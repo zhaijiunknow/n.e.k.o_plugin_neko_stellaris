@@ -873,11 +873,57 @@ def test_standalone_export() -> None:
               and (kept.output_dir / "common").is_dir())
 
 
+def test_icon_from_art() -> None:
+    """The bundled art must produce an icon the game will actually accept."""
+    section("icon from source art")
+    source = voicepack.DEFAULT_ICON_SOURCE
+    if not source.is_file():
+        check("source art is present", False, f"missing {source}")
+        return
+    check("source art is present", True)
+
+    try:
+        payload = ddsicon.render_icon_from_image(source)
+    except Exception as exc:  # noqa: BLE001 - Pillow is optional
+        check("Pillow can render the icon", False, f"{type(exc).__name__}: {exc}")
+        return
+
+    # Same shape the vanilla advisor icons use; anything else risks the slot not
+    # rendering, and this is cheap to assert.
+    check("icon is 29x29",
+          int.from_bytes(payload[12:16], "little") == 29
+          and int.from_bytes(payload[16:20], "little") == 29)
+    check("icon is exactly the vanilla byte count",
+          len(payload) == 3492, f"{len(payload)}")
+    check("icon header matches vanilla", payload[:4] == b"DDS "
+          and int.from_bytes(payload[80:84], "little") == 0x41
+          and int.from_bytes(payload[88:92], "little") == 32)
+    pixels = payload[128:]
+    check("icon is opaque where the character is",
+          sum(1 for i in range(3, len(pixels), 4) if pixels[i] == 255) == 29 * 29,
+          "the crop has no transparency, which is expected for a full-bleed icon")
+    check("icon actually contains the art, not a flat fill",
+          len({pixels[i:i+3] for i in range(0, len(pixels), 4)}) > 40,
+          "a near-flat icon means the crop landed somewhere empty")
+
+    thumb = ddsicon.render_thumbnail_png(source, 512)
+    check("thumbnail is a 512 PNG",
+          thumb[:8] == b"\x89PNG\r\n\x1a\n" and len(thumb) > 10000, f"{len(thumb)} bytes")
+
+    # A missing source must degrade to the procedural mark, not fail the build.
+    spec = voicepack.PackSpec(icon_source=str(source.parent / "does_not_exist.png"))
+    check("a missing source falls back to the built-in mark",
+          spec.resolved_icon_source() is None)
+    check("an explicit source wins when it exists",
+          voicepack.PackSpec(icon_source=str(source)).resolved_icon_source() == source)
+
+
 def main() -> int:
     print("neko_stellaris offline smoke suite")
     test_voice_plan()
     test_voice_pack_files()
     test_dds_icon()
+    test_icon_from_art()
     test_bridge()
     test_gamelog_parsing()
     test_gamelog_tailer()

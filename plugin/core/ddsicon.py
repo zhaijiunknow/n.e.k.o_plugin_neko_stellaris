@@ -139,11 +139,12 @@ def render_bgra(size: int = DEFAULT_SIZE) -> bytes:
     return bytes(out)
 
 
-def build_dds(size: int = DEFAULT_SIZE) -> bytes:
-    """Complete uncompressed BGRA DDS payload matching the vanilla advisor icons."""
-    if size <= 0 or size > 512:
-        raise ValueError(f"unsupported icon size {size}")
-    pixels = render_bgra(size)
+def _dds_header(size: int) -> bytes:
+    """The 128-byte header vanilla's advisor icons use.
+
+    Uncompressed BGRA, no mipmaps, masks 00FF0000/0000FF00/000000FF/FF000000 --
+    byte-for-byte the shape of every file in ``gfx/interface/icons/advisor_vo``.
+    """
     header = bytearray(128)
     header[0:4] = b"DDS "
     struct.pack_into("<I", header, 4, 124)                 # dwSize
@@ -162,12 +163,117 @@ def build_dds(size: int = DEFAULT_SIZE) -> bytes:
     struct.pack_into("<I", header, 100, 0x000000FF)        # B
     struct.pack_into("<I", header, 104, 0xFF000000)        # A
     struct.pack_into("<I", header, 108, 0x00001000)        # DDSCAPS_TEXTURE
-    return bytes(header) + pixels
+    return bytes(header)
+
+
+def build_dds(size: int = DEFAULT_SIZE) -> bytes:
+    """Complete uncompressed BGRA DDS payload matching the vanilla advisor icons."""
+    if size <= 0 or size > 512:
+        raise ValueError(f"unsupported icon size {size}")
+    return _dds_header(size) + render_bgra(size)
 
 
 def write_dds(path: str | Path, size: int = DEFAULT_SIZE) -> int:
     """Write the icon and return its size in bytes."""
     payload = build_dds(size)
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(payload)
+    return len(payload)
+
+
+# --------------------------------------------------------------------------- #
+# Icon from source art
+# --------------------------------------------------------------------------- #
+
+# Crop of the source illustration, as fractions of the shorter side:
+# (centre x, centre y, side). Tuned by rendering a parameter sweep at the real
+# 29 px and choosing what stays readable there, not by what looks good at full
+# size -- at 29 px only three things survive: the dark hair silhouette, the pale
+# face, and the blue accents. Tighter crops looked better as images and worse as
+# icons, because zooming in far enough to fill the frame with the face also cuts
+# the cat ears, which are the character's only unambiguous identifier.
+ICON_CROP_CENTRE = (0.47, 0.48)
+ICON_CROP_SIDE = 0.96
+# A 29 px icon on a dark UI loses contrast; a little push keeps the face from
+# washing into the hair.
+ICON_CONTRAST = 1.12
+ICON_SATURATION = 1.15
+ICON_SHARPEN = 1.35
+
+
+def _square_crop(image, centre: tuple[float, float], side_fraction: float):
+    width, height = image.size
+    side = int(min(width, height) * side_fraction)
+    cx, cy = int(width * centre[0]), int(height * centre[1])
+    left = max(0, min(cx - side // 2, width - side))
+    top = max(0, min(cy - side // 2, height - side))
+    return image.crop((left, top, left + side, top + side))
+
+
+def render_icon_from_image(source: str | Path, size: int = DEFAULT_SIZE,
+                           *, crop: tuple[float, float, float] | None = None) -> bytes:
+    """Build an uncompressed BGRA DDS from a source illustration.
+
+    Pillow does the decode and the resample, so unlike :func:`build_dds` this
+    needs a third-party import. It is imported here rather than at module scope
+    so a host without Pillow can still use the procedural mark instead of failing
+    to import the module at all.
+    """
+    from PIL import Image, ImageEnhance
+
+    cx, cy, side = crop or (*ICON_CROP_CENTRE, ICON_CROP_SIDE)
+    with Image.open(Path(source)) as handle:
+        image = handle.convert("RGB")
+    square = _square_crop(image, (cx, cy), side)
+
+    # Enhance at full resolution, then downscale: sharpening after the resample
+    # amplifies whatever aliasing the resample introduced.
+    square = ImageEnhance.Contrast(square).enhance(ICON_CONTRAST)
+    square = ImageEnhance.Color(square).enhance(ICON_SATURATION)
+    square = ImageEnhance.Sharpness(square).enhance(ICON_SHARPEN)
+    small = square.resize((size, size), Image.LANCZOS)
+
+    rgba = small.convert("RGBA")
+    pixels = rgba.tobytes()  # RGBA, row-major
+    out = bytearray(size * size * 4)
+    for i in range(size * size):
+        r, g, b, a = pixels[i * 4], pixels[i * 4 + 1], pixels[i * 4 + 2], pixels[i * 4 + 3]
+        out[i * 4 + 0] = b
+        out[i * 4 + 1] = g
+        out[i * 4 + 2] = r
+        out[i * 4 + 3] = a
+    return _dds_header(size) + bytes(out)
+
+
+def render_thumbnail_png(source: str | Path, size: int = 512,
+                         *, crop: tuple[float, float, float] | None = None) -> bytes:
+    """A square PNG for ``thumbnail.png``, which is what the launcher and the
+    Workshop listing show.
+
+    Same crop as the icon on purpose: the icon and the thumbnail should look like
+    the same product, and re-cropping here would be a second thing to keep in
+    sync for no gain.
+    """
+    import io
+
+    from PIL import Image, ImageEnhance
+
+    cx, cy, side = crop or (*ICON_CROP_CENTRE, ICON_CROP_SIDE)
+    with Image.open(Path(source)) as handle:
+        image = handle.convert("RGB")
+    square = _square_crop(image, (cx, cy), side)
+    square = ImageEnhance.Contrast(square).enhance(1.04)
+    square = ImageEnhance.Color(square).enhance(1.06)
+    square = square.resize((size, size), Image.LANCZOS)
+    buffer = io.BytesIO()
+    square.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
+
+
+def write_icon_from_image(source: str | Path, path: str | Path,
+                          size: int = DEFAULT_SIZE) -> int:
+    payload = render_icon_from_image(source, size)
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(payload)

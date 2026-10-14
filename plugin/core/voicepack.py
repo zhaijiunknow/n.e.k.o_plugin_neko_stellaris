@@ -94,6 +94,12 @@ MOD_NAME_EN = "Starlight Meow — Advisor Voice Pack"
 VOICE_DISPLAY_ZH = "YUI"
 VOICE_DISPLAY_EN = "YUI"
 
+# Source art for the advisor icon and the Workshop thumbnail. Resolved relative
+# to this module so it works identically from the N.E.K.O plugin tree and from
+# the standalone checkout. Empty or missing falls back to the procedural mark.
+ASSET_DIR = Path(__file__).resolve().parent.parent / "assets"
+DEFAULT_ICON_SOURCE = ASSET_DIR / "yui_icon_source.png"
+
 # Kept as aliases so existing callers and the CLI's single --name keep working;
 # the value they get is the product name.
 DEFAULT_NAME_ZH = MOD_NAME_ZH
@@ -151,6 +157,10 @@ class PackSpec:
     tags: tuple[str, ...] = ("Sound",)
     max_variants: int = DEFAULT_VARIANTS
     icon_size: int = ddsicon.DEFAULT_SIZE
+    # Path to a source illustration for the icon and thumbnail. Defaults to the
+    # bundled art; set to "" to use the procedural mark instead, or to a path to
+    # use different art without touching code.
+    icon_source: str = ""
 
     def takes_for(self, group: str) -> int:
         """Per-group take budget; ``max_variants`` globally caps it."""
@@ -158,6 +168,18 @@ class PackSpec:
         if self.max_variants > 0:
             budget = min(budget, self.max_variants)
         return max(1, budget)
+
+    def resolved_icon_source(self) -> Path | None:
+        """The icon source to use, or ``None`` for the procedural mark.
+
+        An explicit ``icon_source`` wins; otherwise the bundled art is used if it
+        is present. Returning ``None`` rather than raising keeps the pack
+        buildable in a checkout where the art was never added.
+        """
+        if self.icon_source:
+            path = Path(self.icon_source)
+            return path if path.is_file() else None
+        return DEFAULT_ICON_SOURCE if DEFAULT_ICON_SOURCE.is_file() else None
 
 
 @dataclass
@@ -879,8 +901,23 @@ async def build_pack(
         (loc_dir / f"{plan.spec.mod_id}_l_{language}.yml").write_bytes(
             render_localisation(plan.spec, language=language, display=display))
 
+    icon_source = plan.spec.resolved_icon_source()
     icon_path = out / "gfx" / "interface" / "icons" / "advisor_vo" / f"{plan.spec.mod_id}.dds"
-    ddsicon.write_dds(icon_path, plan.spec.icon_size)
+    if icon_source is not None:
+        try:
+            ddsicon.write_icon_from_image(icon_source, icon_path, plan.spec.icon_size)
+            # thumbnail.png at the mod root is what the launcher and the Workshop
+            # listing show. Same crop as the icon on purpose.
+            (out / "thumbnail.png").write_bytes(
+                ddsicon.render_thumbnail_png(icon_source))
+        except Exception as exc:  # noqa: BLE001 - Pillow missing or art unreadable
+            logger.warning("源图无法用作图标（%s），回退到程序生成的标记", exc)
+            if not icon_path.is_file():
+                ddsicon.write_dds(icon_path, plan.spec.icon_size)
+            (out / "thumbnail.png").unlink(missing_ok=True)
+    else:
+        ddsicon.write_dds(icon_path, plan.spec.icon_size)
+        (out / "thumbnail.png").unlink(missing_ok=True)
 
     (out / "descriptor.mod").write_text(
         render_descriptor(plan.spec), encoding="utf-8", newline="\n")
