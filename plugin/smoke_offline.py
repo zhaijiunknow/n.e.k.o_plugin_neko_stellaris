@@ -1048,6 +1048,118 @@ def test_layout_independence() -> None:
           "probe result is never checked for absence")
 
 
+def test_published_copy() -> None:
+    """After a Workshop publish the launcher deletes our local install.
+
+    Everything that located the pack by path then answers about a directory that
+    no longer exists: the startup check calls the mod "not installed" while the
+    game is loading it, and auto-install writes a second copy. Two copies is not
+    merely untidy -- the bridge's on_action hooks are appended once per copy, so
+    every bridged event fires twice.
+    """
+    section("published (workshop) copy")
+    import json
+    import shutil
+    import tempfile
+
+    from core import installer as inst
+
+    mod = voicepack.DEFAULT_MOD_ID
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="neko-published-"))
+    try:
+        user = tmp / "Stellaris"
+        (user / "mod").mkdir(parents=True)
+        dlc = user / "dlc_load.json"
+        dlc.write_text('{"enabled_mods": [], "disabled_dlcs": []}', encoding="utf-8")
+
+        check("nothing installed anywhere -> no active install",
+              inst.find_active_install(user, mod_id=mod) is None)
+        check("and nothing is blocked",
+              not inst.published_copy_blocks_install(user, mod_id=mod)[0])
+
+        # A local install, which is what the plugin writes itself.
+        local = user / "mod" / mod
+        (local / "sound").mkdir(parents=True)
+        (local / inst.MARKER_NAME).write_text("{}", encoding="utf-8")
+        active = inst.find_active_install(user, mod_id=mod)
+        check("a local install is found and labelled local",
+              active is not None and active.kind == "local")
+
+        # The Workshop copy, reachable only through the launcher's own stub: the
+        # mod directory lives under Steam's tree and its name is a numeric id.
+        ws = tmp / "workshop" / "3819922949"
+        (ws / "sound").mkdir(parents=True)
+        (ws / "sound" / f"{mod}.asset").write_text("soundgroup = { }", encoding="utf-8")
+        (user / "mod" / "ugc_3819922949.mod").write_text(
+            f'name="X"\npath="{ws.as_posix()}"\nremote_file_id="3819922949"\n',
+            encoding="utf-8")
+        published = inst.find_published_copy(user, mod_id=mod)
+        check("the workshop copy is found through the launcher's stub",
+              published is not None and published.remote_id == "3819922949",
+              published.summary() if published else None)
+        check("the local copy still wins while it exists",
+              inst.find_active_install(user, mod_id=mod).kind == "local")
+
+        # The migration itself: the launcher deletes the local directory.
+        shutil.rmtree(local)
+        (user / "mod" / f"{mod}.mod").write_text("", encoding="utf-8")
+        active = inst.find_active_install(user, mod_id=mod)
+        check("after migration the workshop copy is the active install",
+              active is not None and active.kind == "workshop")
+        check("it is enabled by the workshop stub, not ours",
+              active.stub_name(mod) == "mod/ugc_3819922949.mod",
+              active.stub_name(mod))
+        blocked, why = inst.published_copy_blocks_install(user, mod_id=mod)
+        check("a second copy would be refused, with a reason", blocked and bool(why))
+
+        dlc.write_text(
+            '{"enabled_mods": ["mod/ugc_3819922949.mod"], "disabled_dlcs": []}',
+            encoding="utf-8")
+        report = inst.inspect_installation(user, mod_id=mod)
+        check("inspect_installation reports the published source",
+              report.installed and report.source == "workshop", report.source)
+        check("and reads registration through the workshop stub", report.registered)
+        check("the summary says Steam owns it", "创意工坊" in report.summary())
+
+        result = inst.uninstall_pack(user, mod_id=mod)
+        check("uninstall does not touch the workshop copy",
+              ws.is_dir() and any("创意工坊" in n for n in result.notes), result.notes)
+
+        # Decoys. A stub pointing nowhere, a stub pointing at somebody else's mod,
+        # and -- the one that actually bit -- a published copy of a *different*
+        # mod of ours: every pack we install writes the same marker filename, so
+        # matching on the marker's existence alone made the bridge mod resolve to
+        # the voice pack's published copy and report its 248 wavs as its own.
+        (user / "mod" / "ugc_1111111111.mod").write_text(
+            'path="D:/nowhere/1111111111"\n', encoding="utf-8")
+        other = tmp / "workshop" / "2222222222"
+        (other / "sound").mkdir(parents=True)
+        (other / "sound" / "someone_else.asset").write_text("", encoding="utf-8")
+        (user / "mod" / "ugc_2222222222.mod").write_text(
+            f'path="{other.as_posix()}"\n', encoding="utf-8")
+        sibling = tmp / "workshop" / "3333333333"
+        sibling.mkdir(parents=True)
+        (sibling / inst.MARKER_NAME).write_text(
+            json.dumps({"mod_id": "nekko_stellaris_bridge", "version": "1.0.0"}),
+            encoding="utf-8")
+        (user / "mod" / "ugc_3333333333.mod").write_text(
+            f'path="{sibling.as_posix()}"\n', encoding="utf-8")
+
+        found = inst.find_published_copy(user, mod_id=mod)
+        check("decoy stubs are ignored",
+              found is not None and found.remote_id == "3819922949",
+              found.remote_id if found else None)
+        sibling_found = inst.find_published_copy(user, mod_id="nekko_stellaris_bridge")
+        check("a sibling mod's published copy is found only under its own id",
+              sibling_found is not None and sibling_found.remote_id == "3333333333",
+              sibling_found.remote_id if sibling_found else None)
+        check("active-install summaries describe both kinds",
+              "创意工坊" in active.summary()
+              and "本地" in inst.ActiveInstall(pathlib.Path("x"), "local").summary())
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     print("neko_stellaris offline smoke suite")
     test_voice_plan()
@@ -1064,6 +1176,7 @@ def main() -> int:
     test_freshness()
     test_standalone_export()
     test_layout_independence()
+    test_published_copy()
 
     print()
     print("=" * 60)

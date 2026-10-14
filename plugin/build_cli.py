@@ -90,8 +90,13 @@ def cmd_check(args: argparse.Namespace) -> int:
     from core.tts import TtsSettings
     tts = TtsSettings(url=resolved.url, api_key=resolved.api_key, voice_id=resolved.voice_id)
 
+    active = installer.find_active_install(user, mod_id=spec.mod_id)
+    mod_dir = (active.path if active is not None
+               else pathlib.Path(user) / "mod" / spec.mod_id)
+    if active is not None and active.is_published:
+        print("已装位置  :", active.summary())
     fresh = voicepack.check_freshness(
-        pathlib.Path(user) / "mod" / spec.mod_id, spec, dataset, lines, tts,
+        mod_dir, spec, dataset, lines, tts,
         cache_dir=nekoconfig.tts_cache_dir())
     print("状态      :", fresh.state)
     print("结论      :", fresh.summary())
@@ -129,7 +134,9 @@ def cmd_manifest(args: argparse.Namespace) -> int:
         if not user:
             print("未找到 Stellaris 用户目录", file=sys.stderr)
             return 3
-        targets.append(pathlib.Path(user) / "mod" / voicepack.DEFAULT_MOD_ID)
+        active = installer.find_active_install(user, mod_id=voicepack.DEFAULT_MOD_ID)
+        targets.append(active.path if active is not None
+                       else pathlib.Path(user) / "mod" / voicepack.DEFAULT_MOD_ID)
     targets.append(_workdir(args) / "voice")
 
     wrote = 0
@@ -437,6 +444,9 @@ def _installed_mod_dir() -> pathlib.Path:
     user = nekoconfig.find_stellaris_user_dir()
     if not user:
         raise SystemExit("未找到 Stellaris 用户目录")
+    active = installer.find_active_install(user, mod_id=voicepack.DEFAULT_MOD_ID)
+    if active is not None and (active.path / "sound").is_dir():
+        return active.path
     mod_dir = pathlib.Path(user) / "mod" / voicepack.DEFAULT_MOD_ID
     if not (mod_dir / "sound").is_dir():
         raise SystemExit(f"语音包未安装：{mod_dir}")

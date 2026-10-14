@@ -90,6 +90,27 @@ python plugin/plugins/neko_stellaris/build_cli.py playset
 
 对话里也可以用 `stellaris_enable_in_launcher`。**实在不行就在启动器 mod 列表里手动勾这两个 checkbox**，那永远有效。
 
+### 发布之后：本地那份会被启动器删掉
+
+把 mod 发布到创意工坊、再订阅它，启动器会做一次**迁移**：删掉 `Documents/.../mod/<mod_id>/` 和它的 `.mod` 存根，改为启用 `mod/ugc_<id>.mod`，由 Steam 托管那份副本。
+
+这会让所有"按固定路径找已装包"的代码答错：自检会说「游戏里没装顾问语音包」（它其实正在被加载），自动重建会在本地**再装一份**。两份同名的后果不是难看而已——桥接的 on_action 会被追加两次，**每个事件触发两遍**，日志也写两行。
+
+所以工具链现在会：
+
+- 通过 `mod/ugc_*.mod`（或 `pdx_*.mod`）里的 `path=` 找到工坊副本，并确认它确实是我们的——判据是只有我们会生成的文件（`sound/<mod_id>.asset`）或标记文件里记着的 `mod_id`，**不是显示名**（名字会翻译，也可能撞名）；
+- 把它当作**活动安装**：`stellaris_voice_check` 与 `build_cli.py check` 报的是**它的**状态；
+- 本地也有一份时本地优先（那是插件自己拥有、自己会重写的那份）；
+- **自动重建与安装入口都拒绝再装第二份**，并把原因说出来；要更新工坊版本请重新上传工坊条目。
+
+只有命令行是逃生口——那是明确的操作：
+
+```
+python plugin/build_cli.py combined --install      # 就是要本地一份（比如做测试）
+```
+
+卸载同样不会碰工坊副本（那是 Steam 管的），只会在结果里提醒你去 Steam 取消订阅。
+
 ### 换音色
 
 ```
@@ -356,7 +377,7 @@ python plugin/plugins/neko_stellaris/build_cli.py combined --name "由依" --ins
 .venv\Scripts\python.exe plugin\plugins\neko_stellaris\smoke_offline.py
 ```
 
-在宿主里是 172 项检查；从独立仓库直接跑是 170 项通过 + 2 项跳过——那两项要经插件入口读 `Settings`，需要宿主 SDK，缺了它会**显式报告跳过**而不是静默少算。命令在两种布局下都能跑：宿主里用上面那条路径，从独立仓库跑则是 `python plugin/smoke_offline.py`。
+在宿主里是 187 项检查；从独立仓库直接跑是 185 项通过 + 2 项跳过——那两项要经插件入口读 `Settings`，需要宿主 SDK，缺了它会**显式报告跳过**而不是静默少算。命令在两种布局下都能跑：宿主里用上面那条路径，从独立仓库跑则是 `python plugin/smoke_offline.py`。
 
 **不联网、不碰 TTS、不碰游戏**，断言的是插件产出的**格式**——因为这里才是昂贵的错误所在：一个没有覆盖全部可达声音的 soundgroup、一个少了 BOM 的本地化文件、一个头部与原版不符的 DDS、一个没有任何 on_action 会触发的桥接事件。
 
@@ -393,7 +414,7 @@ plugin/plugins/neko_stellaris/
 │   └── persona_brief.md     人设结论（自称「本喵」、称玩家「碳基生物」的来源）
 ├── assets/                  顾问图标原图（游戏内 DDS 与工坊缩略图的上游）
 ├── build_cli.py             不依赖宿主的命令行入口
-├── smoke_offline.py         170 项离线回归检查（宿主内 172）
+├── smoke_offline.py         185 项离线回归检查（宿主内 187）
 └── i18n/
 ```
 
