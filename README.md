@@ -58,7 +58,7 @@ plugin/                 N.E.K.O 插件本体
 ├── i18n/               插件自身的界面文案
 ├── assets/             顾问图标原图：生成游戏内 DDS 与工坊缩略图的来源
 ├── build_cli.py        不依赖宿主的命令行入口
-└── smoke_offline.py    167 项离线回归检查（在宿主里跑是 169 项）
+└── smoke_offline.py    170 项离线回归检查（在宿主里跑是 172 项）
 ```
 
 ### `data/` 里的东西是提取出来的，不是猜的
@@ -97,7 +97,7 @@ python plugin/build_cli.py check              # 游戏里那份是否已过期
 
 ---
 
-## 底线：167 项离线检查
+## 底线：170 项离线检查
 
 ```
 python plugin/smoke_offline.py
@@ -105,7 +105,7 @@ python plugin/smoke_offline.py
 
 **不联网、不碰 TTS、不碰游戏**，断言的是产出的**格式**——因为这里才是昂贵的错误所在。
 
-`build_cli.py` 和 `smoke_offline.py` 都按**自己所在目录**去找 `core/`，所以在「已装进宿主」和「本仓库」两种布局下都能直接跑，不需要 N.E.K.O 在场。唯一的例外是有两项检查要经插件入口读 `Settings`，那需要宿主 SDK；在本仓库里跑时会**显式报告跳过**，结果是 167 项通过 + 2 项跳过，而不是静默少算两项。这条不变量本身也在检查里（`layout independence` 一节），所以它不会再悄悄退化。
+`build_cli.py` 和 `smoke_offline.py` 都按**自己所在目录**去找 `core/`，所以在「已装进宿主」和「本仓库」两种布局下都能直接跑，不需要 N.E.K.O 在场。唯一的例外是有两项检查要经插件入口读 `Settings`，那需要宿主 SDK；在本仓库里跑时会**显式报告跳过**，结果是 170 项通过 + 2 项跳过，而不是静默少算两项。这条不变量本身也在检查里（`layout independence` 一节），所以它不会再悄悄退化。
 
 这套检查在开发过程中抓到过这些真 bug：
 
@@ -130,6 +130,7 @@ python plugin/smoke_offline.py
 | **on_action 的 MERGE 语义成立**（重复顶层名即追加） | `game.log` 里出现 `NEKO\|v1\|heartbeat\|` |
 | **`log` 里的数据引用有效** | `NEKO\|v1\|first_contact_with_empire\|a=联合圣约国\|b=不明帝国\|system=泰伊格\|` |
 | 玩家过滤正确 | 642 条桥接事件全部只属于玩家国家，0 条 AI 国家漏入 |
+| **本地 mod 的封面来自描述符里的 `picture="thumbnail.png"`** | 启动器数据库里该行 `thumbnailPath` 为 NULL，界面就是空封面；工坊 mod 走 Steam API 取图，所以参考 mod 全都没有这个字段——本地 mod 只有这一个来源 |
 
 ---
 

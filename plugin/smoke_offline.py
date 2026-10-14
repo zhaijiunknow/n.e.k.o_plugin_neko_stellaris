@@ -294,6 +294,20 @@ def test_voice_pack_files() -> None:
     stub = voicepack.render_mod_stub(spec)
     check("mod stub points at the mod folder", f'path="mod/{spec.mod_id}"' in stub)
 
+    # ``picture=`` is the only cover a non-Steam mod can have: Steam mods get one
+    # through the Steam API, so a missing field is invisible in every reference
+    # mod. Without it the launcher stores thumbnailPath = NULL and draws an empty
+    # tile, which is precisely what happened here.
+    check("both descriptors name the cover file",
+          f'picture="{voicepack.THUMBNAIL_NAME}"' in descriptor
+          and f'picture="{voicepack.THUMBNAIL_NAME}"' in stub,
+          "the launcher reads picture= from the stub in Documents/mod/")
+    check("the stub names a cover that the pack actually writes",
+          voicepack.THUMBNAIL_NAME == "thumbnail.png")
+    check("no cover is declared when there is no thumbnail to point at",
+          voicepack.picture_line(False) == []
+          and "picture=" not in voicepack.render_descriptor(spec, has_thumbnail=False))
+
     # A duplicated key in either map would silently keep one of the two entries.
     override_lines = re.findall(r"^\t\t(\S+) = \"vo/nekko_stellaris/", asset, re.M)
     declaration_blocks = len(re.findall(r"^sound = \{", asset, re.M))

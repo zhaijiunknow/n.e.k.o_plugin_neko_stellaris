@@ -81,7 +81,9 @@ class CombinedSpec:
         )
 
 
-def render_descriptor(spec: CombinedSpec) -> str:
+def render_descriptor(spec: CombinedSpec, *, has_thumbnail: bool | None = None) -> str:
+    if has_thumbnail is None:
+        has_thumbnail = spec.voice_spec().resolved_icon_source() is not None
     tags = "\n".join(f'\t"{tag}"' for tag in spec.tags)
     return "\n".join([
         f'version="{spec.mod_version}"',
@@ -89,12 +91,15 @@ def render_descriptor(spec: CombinedSpec) -> str:
         tags,
         "}",
         f'name="{spec.name_zh}"',
+        *voicepack.picture_line(has_thumbnail),
         f'supported_version="{spec.supported_version}"',
         "",
     ])
 
 
-def render_mod_stub(spec: CombinedSpec) -> str:
+def render_mod_stub(spec: CombinedSpec, *, has_thumbnail: bool | None = None) -> str:
+    if has_thumbnail is None:
+        has_thumbnail = spec.voice_spec().resolved_icon_source() is not None
     tags = "\n".join(f'\t"{tag}"' for tag in spec.tags)
     return "\n".join([
         f'version="{spec.mod_version}"',
@@ -102,6 +107,7 @@ def render_mod_stub(spec: CombinedSpec) -> str:
         tags,
         "}",
         f'name="{spec.name_zh}"',
+        *voicepack.picture_line(has_thumbnail),
         f'supported_version="{spec.supported_version}"',
         f'path="mod/{spec.mod_id}"',
         "",
@@ -207,7 +213,8 @@ async def build_combined(
     # Reclaim the files both halves would have written.
     phase("写入合并清单")
     (out / "descriptor.mod").write_text(
-        render_descriptor(spec), encoding="utf-8", newline="\n")
+        render_descriptor(spec, has_thumbnail=(out / voicepack.THUMBNAIL_NAME).is_file()),
+        encoding="utf-8", newline="\n")
     (out / "README.md").write_text(
         render_readme(spec, voice_result, bridge_plan), encoding="utf-8", newline="\n")
 

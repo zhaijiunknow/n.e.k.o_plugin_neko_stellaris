@@ -91,7 +91,9 @@ class StandaloneSpec:
         )
 
 
-def render_descriptor(spec: StandaloneSpec) -> str:
+def render_descriptor(spec: StandaloneSpec, *, has_thumbnail: bool | None = None) -> str:
+    if has_thumbnail is None:
+        has_thumbnail = spec.voice_spec().resolved_icon_source() is not None
     tags = "\n".join(f'\t"{tag}"' for tag in spec.tags)
     return "\n".join([
         f'version="{spec.mod_version}"',
@@ -99,12 +101,15 @@ def render_descriptor(spec: StandaloneSpec) -> str:
         tags,
         "}",
         f'name="{spec.name_zh}"',
+        *voicepack.picture_line(has_thumbnail),
         f'supported_version="{spec.supported_version}"',
         "",
     ])
 
 
-def render_mod_stub(spec: StandaloneSpec) -> str:
+def render_mod_stub(spec: StandaloneSpec, *, has_thumbnail: bool | None = None) -> str:
+    if has_thumbnail is None:
+        has_thumbnail = spec.voice_spec().resolved_icon_source() is not None
     tags = "\n".join(f'\t"{tag}"' for tag in spec.tags)
     return "\n".join([
         f'version="{spec.mod_version}"',
@@ -112,6 +117,7 @@ def render_mod_stub(spec: StandaloneSpec) -> str:
         tags,
         "}",
         f'name="{spec.name_zh}"',
+        *voicepack.picture_line(has_thumbnail),
         f'supported_version="{spec.supported_version}"',
         f'path="mod/{spec.mod_id}"',
         "",
@@ -236,8 +242,9 @@ def export_standalone(
         files += 1
         total += target.stat().st_size
 
+    has_cover = (out / voicepack.THUMBNAIL_NAME).is_file()
     (out / "descriptor.mod").write_text(
-        render_descriptor(spec), encoding="utf-8", newline="\n")
+        render_descriptor(spec, has_thumbnail=has_cover), encoding="utf-8", newline="\n")
     (out / "README.md").write_text(
         render_readme(spec, plan, clip_count,
                       game_version=str((dataset or {}).get("game_version") or "")),
@@ -247,7 +254,8 @@ def export_standalone(
     # The stub lives beside the mod folder, not inside it, so it is written to
     # the export root rather than nested one level down.
     stub = out.parent / f"{spec.mod_id}.mod"
-    stub.write_text(render_mod_stub(spec), encoding="utf-8", newline="\n")
+    stub.write_text(render_mod_stub(spec, has_thumbnail=has_cover),
+                    encoding="utf-8", newline="\n")
 
     zip_path = None
     if make_zip:

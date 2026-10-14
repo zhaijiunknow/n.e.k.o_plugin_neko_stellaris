@@ -112,6 +112,9 @@ VO_SUBDIR = "vo/nekko_stellaris"
 # Machine-readable build manifest written next to descriptor.mod. Deliberately
 # not a dotfile: it is part of the pack's public surface, not an internal note.
 MANIFEST_NAME = "pack.json"
+# The mod cover, at the mod root. Named by the descriptors' ``picture=`` line, and
+# the only cover a non-Steam mod has.
+THUMBNAIL_NAME = "thumbnail.png"
 DEFAULT_VARIANTS = 4
 SORT_ORDER = 40
 
@@ -560,7 +563,22 @@ def render_localisation(spec: PackSpec, *, language: str, display: str) -> bytes
     return b"\xef\xbb\xbf" + body.encode("utf-8")
 
 
-def render_descriptor(spec: PackSpec) -> str:
+def picture_line(has_thumbnail: bool) -> list[str]:
+    """The ``picture=`` descriptor line, or nothing when there is no cover.
+
+    This is what gives a *local* mod its cover in the Paradox launcher. Steam mods
+    get a thumbnail through the Steam API, so a mod that omits the field still
+    shows one -- which is exactly why its absence went unnoticed: every reference
+    mod was a Workshop mod. On a purely local install the field is the only source,
+    and without it the launcher stores ``thumbnailPath = NULL`` and draws an empty
+    tile. Relative to the mod directory, matching the game's own mods.
+    """
+    return [f'picture="{THUMBNAIL_NAME}"'] if has_thumbnail else []
+
+
+def render_descriptor(spec: PackSpec, *, has_thumbnail: bool | None = None) -> str:
+    if has_thumbnail is None:
+        has_thumbnail = spec.resolved_icon_source() is not None
     tags = "\n".join(f'\t"{tag}"' for tag in spec.tags)
     return "\n".join([
         f'version="{spec.mod_version}"',
@@ -568,6 +586,7 @@ def render_descriptor(spec: PackSpec) -> str:
         tags,
         "}",
         f'name="{spec.name_zh}"',
+        *picture_line(has_thumbnail),
         f'supported_version="{spec.supported_version}"',
         "",
     ])
@@ -831,13 +850,17 @@ def check_freshness(
     return Freshness(state, reasons, installed, current, clips)
 
 
-def render_mod_stub(spec: PackSpec) -> str:
+def render_mod_stub(spec: PackSpec, *, has_thumbnail: bool | None = None) -> str:
     """The ``<mod_id>.mod`` stub that has to sit in ``Documents/.../Stellaris/mod/``.
 
     It is the descriptor plus a ``path=`` line telling the launcher where the
     real folder is. Relative paths are resolved against the user data directory,
-    so ``mod/<mod_id>`` is the portable form.
+    so ``mod/<mod_id>`` is the portable form. ``picture=`` resolves against the
+    mod directory instead, which is why it is written by both this and the
+    in-folder descriptor.
     """
+    if has_thumbnail is None:
+        has_thumbnail = spec.resolved_icon_source() is not None
     tags = "\n".join(f'\t"{tag}"' for tag in spec.tags)
     return "\n".join([
         f'version="{spec.mod_version}"',
@@ -845,6 +868,7 @@ def render_mod_stub(spec: PackSpec) -> str:
         tags,
         "}",
         f'name="{spec.name_zh}"',
+        *picture_line(has_thumbnail),
         f'supported_version="{spec.supported_version}"',
         f'path="mod/{spec.mod_id}"',
         "",
@@ -954,20 +978,25 @@ async def build_pack(
         try:
             ddsicon.write_icon_from_image(icon_source, icon_path, plan.spec.icon_size)
             # thumbnail.png at the mod root is what the launcher and the Workshop
-            # listing show. Same crop as the icon on purpose.
-            (out / "thumbnail.png").write_bytes(
+            # listing show, named by ``picture=`` in both descriptors.
+            (out / THUMBNAIL_NAME).write_bytes(
                 ddsicon.render_thumbnail_png(icon_source))
         except Exception as exc:  # noqa: BLE001 - Pillow missing or art unreadable
             logger.warning("源图无法用作图标（%s），回退到程序生成的标记", exc)
             if not icon_path.is_file():
                 ddsicon.write_dds(icon_path, plan.spec.icon_size)
-            (out / "thumbnail.png").unlink(missing_ok=True)
+            (out / THUMBNAIL_NAME).unlink(missing_ok=True)
     else:
         ddsicon.write_dds(icon_path, plan.spec.icon_size)
-        (out / "thumbnail.png").unlink(missing_ok=True)
+        (out / THUMBNAIL_NAME).unlink(missing_ok=True)
 
+    # Ask the directory, not the spec: the render above can fail and delete the
+    # cover, and a ``picture=`` pointing at a file that is not there is the same
+    # empty tile in the launcher.
     (out / "descriptor.mod").write_text(
-        render_descriptor(plan.spec), encoding="utf-8", newline="\n")
+        render_descriptor(plan.spec,
+                          has_thumbnail=(out / THUMBNAIL_NAME).is_file()),
+        encoding="utf-8", newline="\n")
 
     # A machine-readable manifest of what was actually built. Without it, a
     # consumer asking "which wavs implement advisor_notification_X" has to
