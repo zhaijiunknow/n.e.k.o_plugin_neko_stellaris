@@ -12,9 +12,14 @@ does not cover every reachable sound, a localisation file without its BOM, a DDS
 whose header does not match what the game ships, a bridge event that no
 on_action ever fires).
 
-Run from the repo root:
+Run it from either layout these sources ship in:
 
     .venv\\Scripts\\python.exe plugin/plugins/neko_stellaris/smoke_offline.py
+    python plugin/smoke_offline.py                    # standalone mirror repo
+
+The single check that touches ``Settings`` lives in the plugin entry point and so
+wants the host SDK; where that is unavailable it is reported as *skipped*, never
+silently dropped.
 """
 
 from __future__ import annotations
@@ -24,12 +29,22 @@ import re
 import sys
 import wave
 
+# ``core/`` sits beside this file in both of the shapes these sources travel in:
+#
+#   <host>/plugin/plugins/neko_stellaris/   installed inside N.E.K.O
+#   <repo>/plugin/                          the standalone mirror repo
+#
+# Importing it *through* the plugin package would execute the entry point first,
+# whose opening act is ``from plugin.sdk.plugin import ...`` -- so the suite would
+# need the host SDK merely to start, and could not run from the mirror at all.
+# Putting this file's own directory on the path imports ``core`` directly, and
+# every core module imports its siblings relatively, so both layouts behave the
+# same and neither drags the host in.
 HERE = pathlib.Path(__file__).resolve().parent
-REPO = HERE.parents[2]
-if str(REPO) not in sys.path:
-    sys.path.insert(0, str(REPO))
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
 
-from plugin.plugins.neko_stellaris.core import (  # noqa: E402
+from core import (  # noqa: E402
     bridge as bridge_core,
     ddsicon,
     gamelog,
@@ -37,9 +52,31 @@ from plugin.plugins.neko_stellaris.core import (  # noqa: E402
     voicepack,
 )
 
+
+def _host_settings():
+    """The plugin's ``Settings`` dataclass, or None when the host is unreachable.
+
+    Exactly one check asserts something about ``Settings`` -- that its ``policy()``
+    borrows the dataclass' own numbers rather than keeping a second copy that can
+    drift. That class lives in the entry point, which imports the N.E.K.O SDK, so
+    this is the one part of the suite that cannot run on a bare interpreter.
+    """
+    repo = HERE.parents[2]
+    if str(repo) not in sys.path:
+        sys.path.append(str(repo))
+    try:
+        from plugin.plugins.neko_stellaris import Settings
+    except Exception:
+        return None
+    return Settings
+
+
+HOST_SETTINGS = _host_settings()
+
 DATA = HERE / "data"
 
 FAILURES: list[str] = []
+SKIPPED: list[str] = []
 CHECKS = 0
 
 
@@ -51,6 +88,12 @@ def check(label: str, condition: bool, detail: str = "") -> None:
     else:
         FAILURES.append(f"{label}: {detail}")
         print(f"  FAIL {label}  {detail}")
+
+
+def skip(label: str, why: str) -> None:
+    """Record a check that could not be attempted, without counting it as one."""
+    SKIPPED.append(f"{label}: {why}")
+    print(f"  skip {label}  ({why})")
 
 
 def section(title: str) -> None:
@@ -448,7 +491,7 @@ def test_gamelog_tailer() -> None:
 
 def test_policy() -> None:
     section("commentary policy")
-    from plugin.plugins.neko_stellaris.core.policy import (
+    from core.policy import (
         CommentaryPolicy, PolicyConfig, build_prompt, DIGEST, URGENT,
     )
     import time as _time
@@ -562,9 +605,13 @@ def test_settings_defaults_match_policy() -> None:
     the older policy.
     """
     section("settings defaults")
-    from plugin.plugins.neko_stellaris import Settings
+    if HOST_SETTINGS is None:
+        skip("Settings.policy() inherits the settings' own numbers",
+             "needs the plugin entry point, hence the host SDK")
+        skip("policy() does not hardcode its own literals", "same reason")
+        return
 
-    defaults = Settings()
+    defaults = HOST_SETTINGS()
     policy = defaults.policy()
     check("Settings.policy() inherits the settings' own numbers",
           policy.urgent_cooldown_s == defaults.urgent_cooldown_s
@@ -574,14 +621,14 @@ def test_settings_defaults_match_policy() -> None:
           f"policy={policy} settings={defaults}")
 
     import inspect
-    source = inspect.getsource(Settings.policy)
+    source = inspect.getsource(HOST_SETTINGS.policy)
     check("policy() does not hardcode its own literals",
           "30.0" not in source and "= 3" not in source, source)
 
 
 def test_live_voice() -> None:
     section("runtime regeneration (live voice)")
-    from plugin.plugins.neko_stellaris.core import livevoice
+    from core import livevoice
 
     dataset = voicepack.load_dataset(DATA / "advisor_sounds.json")
     # Every vanilla soundeffect the default advisor group reaches. A mapping
@@ -698,7 +745,7 @@ def test_manifest_roundtrip(tmp_path=None) -> None:
 
 
 def livevoice_inventory_load(root):
-    from plugin.plugins.neko_stellaris.core import livevoice
+    from core import livevoice
     return livevoice.SlotInventory.load(root)
 
 
@@ -709,8 +756,8 @@ def test_freshness(tmp_path=None) -> None:
     import json as _json
     import tempfile
 
-    from plugin.plugins.neko_stellaris.core.audiowav import wav_bytes_mono16
-    from plugin.plugins.neko_stellaris.core.tts import TtsSettings, cache_path
+    from core.audiowav import wav_bytes_mono16
+    from core.tts import TtsSettings, cache_path
     import array as _array
 
     dataset = voicepack.load_dataset(DATA / "advisor_sounds.json")
@@ -806,7 +853,7 @@ def test_standalone_export() -> None:
     section("standalone voice pack export")
     import tempfile
 
-    from plugin.plugins.neko_stellaris.core import standalone
+    from core import standalone
 
     dataset = voicepack.load_dataset(DATA / "advisor_sounds.json")
     lines = voicepack.load_lines(DATA / "lines.zh-CN.json")
@@ -918,6 +965,58 @@ def test_icon_from_art() -> None:
           voicepack.PackSpec(icon_source=str(source)).resolved_icon_source() == source)
 
 
+def test_layout_independence() -> None:
+    """Both layouts must stay runnable from a bare interpreter.
+
+    These sources ship twice: installed under ``<host>/plugin/plugins/neko_stellaris/``
+    and as the flat ``plugin/`` of the standalone repo. Only the first has the host
+    SDK importable, so anything that reaches for the dotted host path is a trap:
+    the scripts still work where they were developed and break everywhere else.
+    That is exactly how ``build_cli.py`` came to be unusable from its own repo.
+    """
+    section("layout independence")
+
+    core_sources = {p.name: p.read_text(encoding="utf-8")
+                    for p in sorted((HERE / "core").glob("*.py"))}
+    # A *module-level* host import is the trap: it makes the whole module
+    # unloadable without the SDK. Probes are allowed, but they must be lazy so
+    # they can be caught -- nekoconfig.py resolves the host's runtime data root
+    # that way and falls back to ~/.neko_stellaris when the host is absent.
+    module_level = re.compile(r"^(?:from|import)\s+plugin\b", re.M)
+    offenders = sorted(n for n, s in core_sources.items() if module_level.search(s))
+    check("no core module imports the host at module level",
+          not offenders, f"offenders: {offenders}")
+
+    probes = re.findall(r"^\s+from plugin\.\w.*\n(?:\s+.*\n)*?\s+except\b",
+                        core_sources.get("nekoconfig.py", ""), re.M)
+    check("every lazy host probe in nekoconfig.py is guarded",
+          len(probes) >= 2, f"guarded probes found: {len(probes)}")
+
+    relative_only = sorted(n for n, s in core_sources.items()
+                           if re.search(r"^\s*(from|import)\s+core\b", s, re.M))
+    check("no core module imports a sibling by an absolute name",
+          not relative_only, f"offenders: {relative_only}")
+
+    scripts = {p.name: p.read_text(encoding="utf-8")
+               for p in (HERE / "build_cli.py", HERE / "smoke_offline.py")}
+    here_on_path = re.compile(r"sys\.path\.\w+\([^)]*str\(HERE\)")
+    for name, source in sorted(scripts.items()):
+        check(f"{name} locates core/ from its own file, not from a host root",
+              here_on_path.search(source) is not None, "no HERE-based sys.path entry")
+
+    # smoke_offline.py is allowed exactly one host-path import: the Settings probe,
+    # which is guarded and reported as skipped when the SDK is absent. Only the
+    # bootstrap counts -- this function's own source names that import too.
+    bootstrap = scripts["smoke_offline.py"].split("def test_layout_independence")[0]
+    host_imports = bootstrap.count("from plugin.plugins.neko_stellaris import")
+    check("the only host-path import left is the guarded Settings probe",
+          host_imports == 1, f"found {host_imports}")
+    check("that probe is guarded, not bare",
+          "HOST_SETTINGS = _host_settings()" in scripts["smoke_offline.py"]
+          and "HOST_SETTINGS is None" in scripts["smoke_offline.py"],
+          "probe result is never checked for absence")
+
+
 def main() -> int:
     print("neko_stellaris offline smoke suite")
     test_voice_plan()
@@ -933,15 +1032,23 @@ def main() -> int:
     test_manifest_roundtrip()
     test_freshness()
     test_standalone_export()
+    test_layout_independence()
 
     print()
     print("=" * 60)
+    if SKIPPED:
+        print(f"{len(SKIPPED)} check(s) skipped:")
+        for line in SKIPPED:
+            print("  -", line)
     if FAILURES:
         print(f"FAILED {len(FAILURES)}/{CHECKS}")
         for line in FAILURES:
             print("  -", line)
         return 1
-    print(f"all {CHECKS} checks passed")
+    if SKIPPED:
+        print(f"all {CHECKS} checks passed ({len(SKIPPED)} skipped)")
+    else:
+        print(f"all {CHECKS} checks passed")
     return 0
 
 
