@@ -162,6 +162,10 @@ class NekoStellarisPlugin(NekoPluginBase):
         self._live_engine: livevoice.LiveVoiceEngine | None = None
         self._live_engine_error = ""
         self._refresh_job: Job | None = None
+        # Which copy of the pack the game is loading. Not always the one this
+        # plugin wrote: publishing to the Workshop makes the launcher replace the
+        # local install with the subscribed copy.
+        self._active_install: installer.ActiveInstall | None = None
         self._settings = Settings()
 
     # ------------------------------------------------------------------ #
@@ -187,8 +191,24 @@ class NekoStellarisPlugin(NekoPluginBase):
             try:
                 freshness = self._voice_freshness()
                 self.logger.info("语音包自检：%s", freshness.summary())
+                blocked, why = installer.published_copy_blocks_install(
+                    self._stantis_user_dir(), mod_id=ADVISOR_MOD_ID)
                 if freshness.needs_rebuild and self._settings.auto_refresh_voice:
-                    self._start_refresh(freshness)
+                    if blocked:
+                        # Rebuilding here would write a copy the game does not
+                        # read while the published one stays stale -- and it would
+                        # repeat on every startup, because the thing being
+                        # compared never changes. Say so once instead.
+                        self.logger.info("跳过自动重建：%s", why)
+                        self.push_message(
+                            visibility=["hud"], ai_behavior="blind",
+                            parts=[{"type": "text",
+                                    "text": f"顾问语音包需要更新，但游戏里生效的是创意工坊副本，"
+                                            f"本地不会再装一份：{freshness.summary()}。"
+                                            f"要更新它请重新上传工坊版本。"}],
+                            source="stellaris_voice", priority=4)
+                    else:
+                        self._start_refresh(freshness)
                 elif freshness.needs_rebuild:
                     self.push_message(
                         visibility=["hud"], ai_behavior="blind",
@@ -393,19 +413,30 @@ class NekoStellarisPlugin(NekoPluginBase):
         """Compare the installed pack against the current voice and sources."""
         plan, spec, dataset, lines = self._load_plan_inputs(self._settings.variants)
         tts = self._tts_settings()
-        mod_dir = self._stantis_user_dir() / "mod" / ADVISOR_MOD_ID
+        # Resolve which copy the game loads before comparing anything: after the
+        # launcher migrates a published mod, the old local path is gone, and
+        # checking it answers "not installed" about a mod that is running right
+        # now -- which then triggers an auto-install of a second copy.
+        active = installer.find_active_install(self._stantis_user_dir(),
+                                               mod_id=ADVISOR_MOD_ID)
+        self._active_install = active
+        mod_dir = (active.path if active is not None
+                   else self._stantis_user_dir() / "mod" / ADVISOR_MOD_ID)
         fresh = voicepack.check_freshness(
             mod_dir, spec, dataset, lines, tts,
             cache_dir=nekoconfig.tts_cache_dir())
 
         # A pack installed before the two mods were merged is voice-only: its
         # audio is perfectly current, but the event bridge is missing, so live
-        # commentary silently loses every detail the bridge supplies.
-        gap = combined_core.combined_stamp_is_stale(mod_dir)
-        if gap and fresh.state == "fresh":
-            return voicepack.Freshness(
-                "missing_bridge", [gap], fresh.installed, fresh.current,
-                fresh.current.clip_count if fresh.current else 0)
+        # commentary silently loses every detail the bridge supplies. A published
+        # copy is exempt: what it contains is a decision, not drift, and nagging
+        # about it would push the author to "fix" a shipped artefact locally.
+        if active is None or not active.is_published:
+            gap = combined_core.combined_stamp_is_stale(mod_dir)
+            if gap and fresh.state == "fresh":
+                return voicepack.Freshness(
+                    "missing_bridge", [gap], fresh.installed, fresh.current,
+                    fresh.current.clip_count if fresh.current else 0)
         return fresh
 
     def _start_refresh(self, freshness: voicepack.Freshness) -> None:
@@ -647,15 +678,24 @@ class NekoStellarisPlugin(NekoPluginBase):
             job.result["clips_written"] = result.voice.clips_written
 
             if do_install and self._settings.auto_install:
-                install_result = installer.install_pack(
-                    out_dir, self._stantis_user_dir(),
-                    mod_id=ADVISOR_MOD_ID,
-                    mod_stub_text=combined_core.render_mod_stub(spec),
-                    version=spec.mod_version,
-                )
-                job.result["install"] = install_result.summary()
-                job.result["notes"] = install_result.notes
-                job.result["notes"].extend(self._retire_standalone_bridge())
+                blocked, why = installer.published_copy_blocks_install(
+                    self._stantis_user_dir(), mod_id=ADVISOR_MOD_ID)
+                if blocked:
+                    # Build, but do not install: the artifact still lands in the
+                    # data root so it can be uploaded, while the copy the game
+                    # loads stays the single published one.
+                    job.result["install"] = "已跳过本地安装（游戏里生效的是创意工坊副本）"
+                    job.result["notes"] = [why]
+                else:
+                    install_result = installer.install_pack(
+                        out_dir, self._stantis_user_dir(),
+                        mod_id=ADVISOR_MOD_ID,
+                        mod_stub_text=combined_core.render_mod_stub(spec),
+                        version=spec.mod_version,
+                    )
+                    job.result["install"] = install_result.summary()
+                    job.result["notes"] = install_result.notes
+                    job.result["notes"].extend(self._retire_standalone_bridge())
 
             job.state = "done"
             job.ended_at = time.time()
@@ -718,6 +758,10 @@ class NekoStellarisPlugin(NekoPluginBase):
         out_dir = self.data_path("pack")
         if not (out_dir / "descriptor.mod").is_file():
             return Err(SdkError("还没有生成过语音包，先调用 stellaris_build_voice"))
+        blocked, why = installer.published_copy_blocks_install(
+            self._stantis_user_dir(), mod_id=ADVISOR_MOD_ID)
+        if blocked:
+            return Err(SdkError(why))
         try:
             plan, spec, _ds, _ln = self._load_plan_inputs(voicepack.DEFAULT_VARIANTS)
             result = installer.install_pack(
@@ -912,7 +956,14 @@ class NekoStellarisPlugin(NekoPluginBase):
             self._live_engine_error = "live_voice_enabled=false"
             return None
         try:
-            mod_dir = self._stantis_user_dir() / "mod" / ADVISOR_MOD_ID
+            # The slots to rewrite belong to whichever copy the game loads. After
+            # a Workshop publish that is the subscribed directory, so hardcoding
+            # the local path here would report "顾问语音包未安装" and silently take
+            # live commentary down with it.
+            active = installer.find_active_install(self._stantis_user_dir(),
+                                                   mod_id=ADVISOR_MOD_ID)
+            mod_dir = (active.path if active is not None
+                       else self._stantis_user_dir() / "mod" / ADVISOR_MOD_ID)
             if not (mod_dir / "sound").is_dir():
                 self._live_engine_error = "顾问语音包未安装"
                 return None

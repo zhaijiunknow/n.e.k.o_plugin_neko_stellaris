@@ -58,7 +58,7 @@ plugin/                 N.E.K.O 插件本体
 ├── i18n/               插件自身的界面文案
 ├── assets/             顾问图标原图：生成游戏内 DDS 与工坊缩略图的来源
 ├── build_cli.py        不依赖宿主的命令行入口
-└── smoke_offline.py    170 项离线回归检查（在宿主里跑是 172 项）
+└── smoke_offline.py    185 项离线回归检查（在宿主里跑是 187 项）
 ```
 
 ### `data/` 里的东西是提取出来的，不是猜的
@@ -97,7 +97,7 @@ python plugin/build_cli.py check              # 游戏里那份是否已过期
 
 ---
 
-## 底线：170 项离线检查
+## 底线：185 项离线检查
 
 ```
 python plugin/smoke_offline.py
@@ -105,7 +105,7 @@ python plugin/smoke_offline.py
 
 **不联网、不碰 TTS、不碰游戏**，断言的是产出的**格式**——因为这里才是昂贵的错误所在。
 
-`build_cli.py` 和 `smoke_offline.py` 都按**自己所在目录**去找 `core/`，所以在「已装进宿主」和「本仓库」两种布局下都能直接跑，不需要 N.E.K.O 在场。唯一的例外是有两项检查要经插件入口读 `Settings`，那需要宿主 SDK；在本仓库里跑时会**显式报告跳过**，结果是 170 项通过 + 2 项跳过，而不是静默少算两项。这条不变量本身也在检查里（`layout independence` 一节），所以它不会再悄悄退化。
+`build_cli.py` 和 `smoke_offline.py` 都按**自己所在目录**去找 `core/`，所以在「已装进宿主」和「本仓库」两种布局下都能直接跑，不需要 N.E.K.O 在场。唯一的例外是有两项检查要经插件入口读 `Settings`，那需要宿主 SDK；在本仓库里跑时会**显式报告跳过**，结果是 185 项通过 + 2 项跳过，而不是静默少算两项。这条不变量本身也在检查里（`layout independence` 一节），所以它不会再悄悄退化。
 
 这套检查在开发过程中抓到过这些真 bug：
 
@@ -142,6 +142,7 @@ python plugin/smoke_offline.py
 4. **天灾降临、经济赤字、游戏结束没有 on_action 可挂**。
 5. 免费 TTS 端点**并发限制很严**（2 个并发连接都会吃到 `1008 Too many concurrent requests`），整包生成要十几分钟。
 6. **手装的本地 mod 在启动器里没有封面**：这是启动器的限制，不是 mod 能设的——它只在有 `thumbnailUrl`（走 Steam/PDX 服务）时才填封面，本地 mod 的 `.metadata/thumbnail.png` 那条路又要求 `formatVersion == 1.1`，而群星在启动器注册表里是 `null`。发布于创意工坊后封面就会正常显示（工坊预览图用的正是 mod 根目录的 `thumbnail.png`，上限 1 MiB）。
+7. **发布之后，本地那份会被启动器删掉。** 订阅自己的工坊条目时，启动器把本地安装"迁移"走：删掉 `Documents/.../mod/<mod_id>/` 与它的 `.mod` 存根，改为启用 `mod/ugc_<id>.mod`。此后只有 Steam 会写那个目录，所以工具链不再假设文件在自己放过的地方——它会通过存根里的 `path=` 找到工坊副本，把它当作"已装包"（`check` 报的是它的状态），并且**拒绝再装第二份**（同名两份会同时出现在启动器列表里，两个都勾选时桥接的钩子被追加两次，每个事件触发两遍）。要更新工坊版本请重新上传；确实需要本地一份做测试，用命令行 `build_cli.py combined --install`。
 
 ---
 
