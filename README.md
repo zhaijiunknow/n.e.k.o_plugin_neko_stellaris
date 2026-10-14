@@ -40,7 +40,7 @@ nekko_stellaris_advisor/
 ```
 plugin/                 N.E.K.O 插件本体
 ├── plugin.toml         清单 + [stellaris] 配置
-├── __init__.py         入口（11 个 entry + 3 个 lifecycle）
+├── __init__.py         入口（12 个 entry + 3 个 lifecycle）
 ├── core/
 │   ├── audiowav.py     任意 WAV → PCM16 单声道 44100
 │   ├── tts.py          free 通道流式 TTS + 断点续传缓存 + 自适应节流
@@ -55,9 +55,10 @@ plugin/                 N.E.K.O 插件本体
 │   ├── policy.py       解说策略与防刷屏
 │   └── nekoconfig.py   复用用户 N.E.K.O 配置与路径发现
 ├── data/               从游戏里实测提取的数据（见下）
-├── i18n/
+├── i18n/               插件自身的界面文案
+├── assets/             顾问图标原图：生成游戏内 DDS 与工坊缩略图的来源
 ├── build_cli.py        不依赖宿主的命令行入口
-└── smoke_offline.py    151 项离线回归检查
+└── smoke_offline.py    165 项离线回归检查（在宿主里跑是 167 项）
 ```
 
 ### `data/` 里的东西是提取出来的，不是猜的
@@ -82,7 +83,7 @@ plugin/                 N.E.K.O 插件本体
 <N.E.K.O>/plugin/plugins/neko_stellaris/
 ```
 
-也就是把本仓库的 `plugin/` 整个拷过去（名字必须是 `neko_stellaris`，因为 `plugin.toml` 里的入口是 `plugin.plugins.neko_stellaris:...`）。
+也就是把本仓库 `plugin/` 里的**内容**拷进去（目录名必须是 `neko_stellaris`，因为 `plugin.toml` 里的入口是 `plugin.plugins.neko_stellaris:...`）。
 
 > N.E.K.O 也支持把外部目录注册成开发源（development registration），但那条路径要求入口写成 `plugins.<id>` 命名空间，和内置位置的写法不同，且需要在运行中的宿主里注册。这里不依赖它。
 
@@ -96,13 +97,17 @@ python plugin/build_cli.py check              # 游戏里那份是否已过期
 
 ---
 
-## 底线：151 项离线检查
+## 底线：165 项离线检查
 
 ```
 python plugin/smoke_offline.py
 ```
 
-**不联网、不碰 TTS、不碰游戏**，断言的是产出的**格式**——因为这里才是昂贵的错误所在。这套检查在开发过程中抓到过这些真 bug：
+**不联网、不碰 TTS、不碰游戏**，断言的是产出的**格式**——因为这里才是昂贵的错误所在。
+
+`build_cli.py` 和 `smoke_offline.py` 都按**自己所在目录**去找 `core/`，所以在「已装进宿主」和「本仓库」两种布局下都能直接跑，不需要 N.E.K.O 在场。唯一的例外是有两项检查要经插件入口读 `Settings`，那需要宿主 SDK；在本仓库里跑时会**显式报告跳过**，结果是 165 项通过 + 2 项跳过，而不是静默少算两项。这条不变量本身也在检查里（`layout independence` 一节），所以它不会再悄悄退化。
+
+这套检查在开发过程中抓到过这些真 bug：
 
 - `soundfileoverrides` **只能覆盖已存在的名字，不能创建新名字**（`_02` 及以后的变体全被引擎拒绝，error.log 里 64 行 `No sound scripted`）
 - 事件类型与作用域不匹配（`country_event` 挂在行星钩子上，error.log 里 **55,019 行** `unsupported scope`）

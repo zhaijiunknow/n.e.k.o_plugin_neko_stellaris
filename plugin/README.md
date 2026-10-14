@@ -336,6 +336,8 @@ python plugin/plugins/neko_stellaris/build_cli.py status
 python plugin/plugins/neko_stellaris/build_cli.py uninstall
 ```
 
+上面的路径是**宿主布局**的写法。这些脚本按**自身所在目录**去找 `core/`，所以从独立仓库直接跑时把前缀换成 `plugin/`（例如 `python plugin/build_cli.py plan`）就行——脚本不去碰插件入口，因此不需要宿主 SDK 在场。
+
 （`voice` 和 `bridge` 子命令还在，只生成单独一半，留给排查问题用。日常用 `combined`。）
 
 换名字：
@@ -352,7 +354,9 @@ python plugin/plugins/neko_stellaris/build_cli.py combined --name "由依" --ins
 .venv\Scripts\python.exe plugin\plugins\neko_stellaris\smoke_offline.py
 ```
 
-75 项检查，**不联网、不碰 TTS、不碰游戏**，断言的是插件产出的**格式**——因为这里才是昂贵的错误所在：一个没有覆盖全部可达声音的 soundgroup、一个少了 BOM 的本地化文件、一个头部与原版不符的 DDS、一个没有任何 on_action 会触发的桥接事件。
+在宿主里是 167 项检查；从独立仓库直接跑是 165 项通过 + 2 项跳过——那两项要经插件入口读 `Settings`，需要宿主 SDK，缺了它会**显式报告跳过**而不是静默少算。命令在两种布局下都能跑：宿主里用上面那条路径，从独立仓库跑则是 `python plugin/smoke_offline.py`。
+
+**不联网、不碰 TTS、不碰游戏**，断言的是插件产出的**格式**——因为这里才是昂贵的错误所在：一个没有覆盖全部可达声音的 soundgroup、一个少了 BOM 的本地化文件、一个头部与原版不符的 DDS、一个没有任何 on_action 会触发的桥接事件。
 
 这套检查已经抓到过三个真 bug：
 
@@ -365,15 +369,18 @@ python plugin/plugins/neko_stellaris/build_cli.py combined --name "由依" --ins
 ```
 plugin/plugins/neko_stellaris/
 ├── plugin.toml              清单 + [stellaris] 配置
-├── __init__.py              插件入口（9 个 entry + 2 个 lifecycle）
+├── __init__.py              插件入口（12 个 entry + 3 个 lifecycle）
 ├── core/
 │   ├── audiowav.py          任意 WAV → PCM16 单声道 44100
 │   ├── tts.py               free 通道流式 TTS + 断点续传缓存
 │   ├── ddsicon.py           手写未压缩 BGRA DDS（对齐原版 3492 字节）
 │   ├── voicepack.py         语音包规划与产出
+│   ├── combined.py          把语音包与事件桥合成一个 mod
+│   ├── standalone.py        导出不依赖插件的独立语音包
 │   ├── bridge.py            桥接 mod 生成
 │   ├── installer.py         安装/卸载（带所有权保护）
 │   ├── gamelog.py           game.log 增量尾随与解析
+│   ├── livevoice.py         运行时再生：游戏开着时改写顾问将要说的话
 │   ├── policy.py            解说策略与防刷屏
 │   └── nekoconfig.py        复用用户 N.E.K.O 配置与路径发现
 ├── data/
@@ -382,8 +389,9 @@ plugin/plugins/neko_stellaris/
 │   ├── on_action_brief.md   审计结论与踩坑
 │   ├── lines.zh-CN.json     台词表（82 key / 386 条）
 │   └── persona_brief.md     人设结论（自称「本喵」、称玩家「碳基生物」的来源）
+├── assets/                  顾问图标原图（游戏内 DDS 与工坊缩略图的上游）
 ├── build_cli.py             不依赖宿主的命令行入口
-├── smoke_offline.py         84 项离线回归检查
+├── smoke_offline.py         165 项离线回归检查（宿主内 167）
 └── i18n/
 ```
 

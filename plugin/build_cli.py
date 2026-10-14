@@ -16,6 +16,7 @@ installed, or watching the TTS batch in a terminal instead of a progress bar.
     python plugin/plugins/neko_stellaris/build_cli.py bridge --install
     python plugin/plugins/neko_stellaris/build_cli.py status
     python plugin/plugins/neko_stellaris/build_cli.py uninstall
+    python plugin/build_cli.py uninstall                    # standalone mirror repo
 
 Nothing here re-implements the pipeline; it only wires arguments to the same
 ``core`` modules the entries call, so the two paths cannot drift.
@@ -31,12 +32,20 @@ import pathlib
 import sys
 import time
 
+# ``core/`` sits beside this file in both of the shapes these sources travel in:
+#
+#   <host>/plugin/plugins/neko_stellaris/   installed inside N.E.K.O
+#   <repo>/plugin/                          the standalone mirror repo
+#
+# Importing it *through* the plugin package would execute the entry point first,
+# which imports the host SDK -- so this CLI would only ever run inside a host
+# checkout, which defeats the point of having it. Importing ``core`` from this
+# file's own directory works in both layouts and needs no host at all.
 HERE = pathlib.Path(__file__).resolve().parent
-REPO = HERE.parents[2]
-if str(REPO) not in sys.path:
-    sys.path.insert(0, str(REPO))
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
 
-from plugin.plugins.neko_stellaris.core import (  # noqa: E402
+from core import (  # noqa: E402
     bridge as bridge_core,
     combined as combined_core,
     installer,
@@ -44,7 +53,7 @@ from plugin.plugins.neko_stellaris.core import (  # noqa: E402
     standalone as standalone_core,
     voicepack,
 )
-from plugin.plugins.neko_stellaris.core.tts import TtsSettings  # noqa: E402
+from core.tts import TtsSettings  # noqa: E402
 
 DATA = HERE / "data"
 
@@ -78,7 +87,7 @@ def cmd_check(args: argparse.Namespace) -> int:
         print("未找到 Stellaris 用户目录", file=sys.stderr)
         return 3
     resolved = nekoconfig.load_settings(voice_override=args.voice or "")
-    from plugin.plugins.neko_stellaris.core.tts import TtsSettings
+    from core.tts import TtsSettings
     tts = TtsSettings(url=resolved.url, api_key=resolved.api_key, voice_id=resolved.voice_id)
 
     fresh = voicepack.check_freshness(
@@ -385,7 +394,7 @@ def cmd_status(args: argparse.Namespace) -> int:
           f"({resolved.key_source})")
     if not user:
         return 1
-    from plugin.plugins.neko_stellaris.core import gamelog
+    from core import gamelog
     print("日志               :", gamelog.describe_log(user))
     for mod_id in (voicepack.DEFAULT_MOD_ID, bridge_core.DEFAULT_MOD_ID):
         print("mod                :", installer.inspect_installation(user, mod_id=mod_id).summary())
@@ -471,8 +480,8 @@ async def _probe_install(args: argparse.Namespace) -> int:
     if not resolved.voice_id:
         print("没有可用音色", file=sys.stderr)
         return 2
-    from plugin.plugins.neko_stellaris.core.tts import TtsSettings, synthesize_with_retry
-    from plugin.plugins.neko_stellaris.core.audiowav import prepare_for_game, wav_bytes_mono16
+    from core.tts import TtsSettings, synthesize_with_retry
+    from core.audiowav import prepare_for_game, wav_bytes_mono16
 
     tts = TtsSettings(url=resolved.url, api_key=resolved.api_key,
                       voice_id=resolved.voice_id)
