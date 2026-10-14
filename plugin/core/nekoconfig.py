@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -192,6 +193,31 @@ def find_stellaris_user_dir() -> Path | None:
     return None
 
 
+def _host_runtime_root() -> Path | None:
+    """The runtime data root the SDK hands the plugin, computed without the SDK.
+
+    The CLI runs where the SDK is not importable. Both fallbacks below used to
+    invent ``~/.neko_stellaris`` instead, which is somewhere the host never looks:
+    the plugin cached 248 clips under the real root, the CLI saw an empty
+    directory and re-synthesized all of them against a rate-limited endpoint. The
+    host's own choice is per platform.
+    """
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA")
+        return Path(base) / "N.E.K.O" if base else None
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "N.E.K.O"
+    base = os.environ.get("XDG_DATA_HOME")
+    return (Path(base) if base else Path.home() / ".local" / "share") / "N.E.K.O"
+
+
+def _clip_count(directory: Path) -> int:
+    try:
+        return sum(1 for _ in directory.glob("*.wav"))
+    except OSError:
+        return 0
+
+
 def tts_cache_dir() -> Path:
     """Where synthesized clips are cached, shared by the plugin and the CLI.
 
@@ -199,14 +225,25 @@ def tts_cache_dir() -> Path:
     ``<runtime data root>/plugins/<id>/cache/tts``. The CLI previously invented
     its own ``data/tts_cache`` beside the build output, so the two never shared a
     cache: a rebuild from the terminal re-synthesized all 248 clips and hit the
-    free endpoint's rate limiter from scratch. Defined once here so that cannot
-    happen again.
+    free endpoint's rate limiter from scratch.
+
+    Without the SDK the same mistake is still available in a subtler form -- guess
+    the wrong root and the cache looks empty -- so candidates are ranked by how
+    many clips they already hold rather than by preference. Picking an empty
+    directory is silent and expensive; picking a full one is free and correct.
     """
     try:
         from plugin.sdk.shared.core.base_runtime import resolve_runtime_data_root
         return resolve_runtime_data_root() / "plugins" / "neko_stellaris" / "cache" / "tts"
     except Exception:
-        return Path.home() / ".neko_stellaris" / "cache" / "tts"
+        pass
+
+    candidates: list[Path] = []
+    root = _host_runtime_root()
+    if root is not None:
+        candidates.append(root / "plugins" / "neko_stellaris" / "cache" / "tts")
+    candidates.append(Path.home() / ".neko_stellaris" / "cache" / "tts")
+    return max(candidates, key=_clip_count)
 
 
 def default_work_dir() -> Path:
@@ -220,6 +257,9 @@ def default_work_dir() -> Path:
         from plugin.sdk.shared.core.base_runtime import resolve_runtime_data_root
         return resolve_runtime_data_root() / "plugins" / "neko_stellaris" / "data"
     except Exception:
+        root = _host_runtime_root()
+        if root is not None:
+            return root / "plugins" / "neko_stellaris" / "data"
         return Path.home() / ".neko_stellaris" / "data"
 
 

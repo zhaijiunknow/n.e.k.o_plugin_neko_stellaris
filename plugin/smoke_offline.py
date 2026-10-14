@@ -957,6 +957,22 @@ def test_icon_from_art() -> None:
     check("thumbnail is a 512 PNG",
           thumb[:8] == b"\x89PNG\r\n\x1a\n" and len(thumb) > 10000, f"{len(thumb)} bytes")
 
+    # The cover must not inherit the icon's frame. Both used to share one crop,
+    # justified as "one less thing to keep in sync" -- but the 29 px frame shaves
+    # the bottom of the art and offsets the rest, which at 512 px reads as an
+    # accident. Assert the behaviour, not just the constants.
+    from PIL import Image
+    with Image.open(source) as handle:
+        art = handle.convert("RGB")
+    framed = ddsicon._square_crop(art, ddsicon.THUMBNAIL_CROP_CENTRE,
+                                  ddsicon.THUMBNAIL_CROP_SIDE)
+    check("the cover frame keeps the whole square artwork",
+          framed.size == art.size, f"{framed.size} vs {art.size}")
+    check("the cover frame is not the icon's frame",
+          (ddsicon.THUMBNAIL_CROP_CENTRE, ddsicon.THUMBNAIL_CROP_SIDE)
+          != (ddsicon.ICON_CROP_CENTRE, ddsicon.ICON_CROP_SIDE),
+          "the two frames were merged again; the 29 px crop is wrong for a cover")
+
     # A missing source must degrade to the procedural mark, not fail the build.
     spec = voicepack.PackSpec(icon_source=str(source.parent / "does_not_exist.png"))
     check("a missing source falls back to the built-in mark",

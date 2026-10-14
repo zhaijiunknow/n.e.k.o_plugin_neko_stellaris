@@ -629,6 +629,7 @@ class PackStamp:
     voice_fingerprint: str = ""
     lines_revision: str = ""
     dataset_revision: str = ""
+    art_revision: str = ""
     game_version: str = ""
     clip_count: int = 0
     built_at: float = 0.0
@@ -640,6 +641,7 @@ class PackStamp:
             "voice_fingerprint": self.voice_fingerprint,
             "lines_revision": self.lines_revision,
             "dataset_revision": self.dataset_revision,
+            "art_revision": self.art_revision,
             "game_version": self.game_version,
             "clip_count": self.clip_count,
             "built_at": self.built_at,
@@ -655,6 +657,7 @@ class PackStamp:
             voice_fingerprint=str(raw.get("voice_fingerprint") or ""),
             lines_revision=str(raw.get("lines_revision") or ""),
             dataset_revision=str(raw.get("dataset_revision") or ""),
+            art_revision=str(raw.get("art_revision") or ""),
             game_version=str(raw.get("game_version") or ""),
             clip_count=int(raw.get("clip_count") or 0),
             built_at=float(raw.get("built_at") or 0.0),
@@ -667,6 +670,37 @@ def _revision(payload: Any) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
+def _art_revision(spec: PackSpec) -> str:
+    """Identity of everything that shapes the icon and the cover.
+
+    Tracked apart from the audio because it goes stale for entirely different
+    reasons: swap the illustration, or re-frame the cover, and every wav stays
+    valid while the images already installed in the game do not. Without this the
+    freshness check reported "fresh" and left the previous cover in place -- the
+    same shape of mistake as reading the wrong line table, in a different input.
+    """
+    digest = hashlib.sha256()
+    source = spec.resolved_icon_source()
+    if source is None:
+        digest.update(b"procedural-mark")
+    else:
+        path = Path(source)
+        digest.update(path.name.encode("utf-8"))
+        try:
+            digest.update(path.read_bytes())
+        except OSError:
+            digest.update(b"unreadable")
+    # The frames count as inputs too: they are tuned constants, and retuning one
+    # changes the output without touching a byte of the source art.
+    digest.update(repr((
+        ddsicon.ICON_CROP_CENTRE, ddsicon.ICON_CROP_SIDE,
+        ddsicon.THUMBNAIL_CROP_CENTRE, ddsicon.THUMBNAIL_CROP_SIDE,
+        ddsicon.ICON_CONTRAST, ddsicon.ICON_SATURATION, ddsicon.ICON_SHARPEN,
+        spec.icon_size,
+    )).encode("utf-8"))
+    return digest.hexdigest()[:16]
+
+
 def compute_stamp(spec: PackSpec, dataset: dict[str, Any], lines: dict[str, list[str]],
                   tts: "TtsSettings | None", clip_count: int) -> PackStamp:
     return PackStamp(
@@ -675,6 +709,7 @@ def compute_stamp(spec: PackSpec, dataset: dict[str, Any], lines: dict[str, list
         voice_fingerprint=(tts.fingerprint() if tts else ""),
         lines_revision=_revision(lines),
         dataset_revision=_revision(dataset),
+        art_revision=_art_revision(spec),
         game_version=str(dataset.get("game_version") or ""),
         clip_count=clip_count,
         built_at=time.time(),
@@ -697,7 +732,8 @@ class Freshness:
     """Verdict of comparing an installed pack against what would be built now."""
 
     state: str                       # fresh | voice_changed | lines_changed |
-                                     # dataset_changed | no_stamp | not_installed
+                                     # dataset_changed | art_changed |
+                                     # no_stamp | not_installed
     reasons: list[str] = field(default_factory=list)
     installed: PackStamp | None = None
     current: PackStamp | None = None
@@ -716,6 +752,7 @@ class Freshness:
             "voice_changed": "N.E.K.O 的音色变了，游戏里还是旧音色",
             "lines_changed": "台词表变了，游戏里还是旧台词",
             "dataset_changed": "游戏版本对应的顾问事件清单变了",
+            "art_changed": "图标或封面的来源/取景变了，游戏里还是旧的图",
             "missing_bridge": "游戏里那份只有语音，没有事件桥（旧版本装的）",
         }.get(self.state, self.state)
         detail = f"；需重新合成 {self.clips_to_generate} 条" if self.clips_to_generate else ""
@@ -771,9 +808,19 @@ def check_freshness(
         state = "dataset_changed"
         reasons.append(f"数据集版本 {installed.game_version or '?'} → "
                        f"{current.game_version or '?'}")
+    elif installed.art_revision != current.art_revision:
+        # Last because it is the cheapest to satisfy: the images are redrawn from
+        # the source art and every wav stays cached, so this rebuild costs seconds
+        # even though it rewrites the whole mod directory.
+        state = "art_changed"
+        reasons.append("音频不受影响，重建只需重绘图标与封面")
 
     clips = 0
-    if state != "fresh":
+    # art_changed is deliberately excluded: the images are redrawn while every wav
+    # is reused, so reporting the full clip count here would price a rebuild that
+    # costs seconds as if it were the minutes-long TTS batch, and talk the user out
+    # of work that is essentially free.
+    if state in ("voice_changed", "lines_changed", "dataset_changed"):
         from .tts import TtsSettings as _Tts, count_cache_misses
         if isinstance(tts, _Tts) and cache_dir:
             clips = count_cache_misses(

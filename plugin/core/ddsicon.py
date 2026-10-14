@@ -201,6 +201,16 @@ ICON_CONTRAST = 1.12
 ICON_SATURATION = 1.15
 ICON_SHARPEN = 1.35
 
+# The cover is a different job from the icon and gets its own frame. It is viewed
+# large, so it can afford the whole illustration -- and it should, because the
+# icon's 29 px frame shaves the bottom of the art (the hoodie and the little bear)
+# and offsets what is left. At 512 px neither of those buys any legibility; they
+# just look like the picture was cropped by accident. (0.5, 0.5, 1.0) is the whole
+# square, centred: on a square source it crops nothing, and on a non-square one it
+# trims only the long axis, which a square cover has to do regardless.
+THUMBNAIL_CROP_CENTRE = (0.5, 0.5)
+THUMBNAIL_CROP_SIDE = 1.0
+
 
 def _square_crop(image, centre: tuple[float, float], side_fraction: float):
     width, height = image.size
@@ -251,15 +261,14 @@ def render_thumbnail_png(source: str | Path, size: int = 512,
     """A square PNG for ``thumbnail.png``, which is what the launcher and the
     Workshop listing show.
 
-    Same crop as the icon on purpose: the icon and the thumbnail should look like
-    the same product, and re-cropping here would be a second thing to keep in
-    sync for no gain.
+    Framed to show the whole illustration instead of reusing the icon's crop --
+    see ``THUMBNAIL_CROP_*`` for why those are two different frames.
     """
     import io
 
     from PIL import Image, ImageEnhance
 
-    cx, cy, side = crop or (*ICON_CROP_CENTRE, ICON_CROP_SIDE)
+    cx, cy, side = crop or (*THUMBNAIL_CROP_CENTRE, THUMBNAIL_CROP_SIDE)
     with Image.open(Path(source)) as handle:
         image = handle.convert("RGB")
     square = _square_crop(image, (cx, cy), side)
