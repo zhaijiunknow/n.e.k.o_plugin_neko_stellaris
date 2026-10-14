@@ -1,0 +1,16 @@
+# Normalise line endings on commit, and keep the working tree LF everywhere.
+# The global setting on this machine is core.autocrlf=true, which would otherwise
+# rewrite every text file on checkout and produce a whole-file diff the first
+# time someone on another platform touches it. The files this project *generates*
+# (sound assets, localisation, descriptors) are written with LF explicitly in
+# code and are never committed, so this only concerns sources.
+* text=auto eol=lf
+
+# Binary assets, declared so git never tries to diff or merge them.
+*.dds binary
+*.wav binary
+*.png binary
+*.zip binary
+
+# Generated mod output, in case someone points --workdir at the checkout.
+*.asset text eol=lf

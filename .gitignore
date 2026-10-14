@@ -1,0 +1,28 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Build output. The plugin writes builds into N.E.K.O's runtime data root rather
+# than beside its own source, so nothing here should normally exist; these rules
+# are here so a manual `--workdir` inside the checkout cannot get committed.
+.build/
+build/
+dist/
+*-standalone/
+*.zip
+
+# Generated voice packs are ~36 MiB of audio and are reproducible from
+# data/lines.zh-CN.json plus a TTS call. Publish them as release assets, not as
+# commits.
+*.wav
+!plugin/data/**/*.wav
+
+# Local tooling
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+Thumbs.db

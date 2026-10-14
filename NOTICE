@@ -1,0 +1,28 @@
+星辰喵语 (Starlight Meow)
+Copyright 2025-2026 Project N.E.K.O. Team
+
+This product includes software developed as part of N.E.K.O
+(https://github.com/Project-N-E-K-O).
+
+The plugin sources under plugin/ are derived from the N.E.K.O project and keep
+their original Apache-2.0 copyright headers. See LICENSE for the full text.
+
+--------------------------------------------------------------------------------
+
+Game data extracted from Stellaris
+
+The files under plugin/data/ include facts extracted from a local installation of
+Stellaris (Cygnus v4.5.2):
+
+  * advisor_sounds.json  -- the set of advisor sound names reachable by the
+                            default advisor voice group, parsed from
+                            sound/soundeffects.asset
+  * on_action_hooks.json -- on_action names, source file and line, scope, and the
+                            event type vanilla uses on each hook, audited from
+                            common/on_actions/ and events/
+
+These are lists of identifiers and derived metadata, not game assets. No audio,
+texture, or localisation content from Stellaris is redistributed.
+
+Stellaris is a trademark of Paradox Interactive AB. This project is not
+affiliated with or endorsed by Paradox Interactive.
