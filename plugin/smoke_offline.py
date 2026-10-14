@@ -294,15 +294,16 @@ def test_voice_pack_files() -> None:
     stub = voicepack.render_mod_stub(spec)
     check("mod stub points at the mod folder", f'path="mod/{spec.mod_id}"' in stub)
 
-    # ``picture=`` is the only cover a non-Steam mod can have: Steam mods get one
-    # through the Steam API, so a missing field is invisible in every reference
-    # mod. Without it the launcher stores thumbnailPath = NULL and draws an empty
-    # tile, which is precisely what happened here.
-    check("both descriptors name the cover file",
+    # ``picture=`` is a community convention, NOT what gives a local mod its
+    # launcher cover: the launcher's bundle was searched and never reads the key,
+    # and for Stellaris the metadata route is disabled outright (the launcher's
+    # own game registry records ``formatVersion: null``, while metadata processing
+    # requires 1.1). These checks pin the field so it is not dropped silently --
+    # they do not claim it fixes a blank tile.
+    check("both descriptors carry the cover line by convention",
           f'picture="{voicepack.THUMBNAIL_NAME}"' in descriptor
-          and f'picture="{voicepack.THUMBNAIL_NAME}"' in stub,
-          "the launcher reads picture= from the stub in Documents/mod/")
-    check("the stub names a cover that the pack actually writes",
+          and f'picture="{voicepack.THUMBNAIL_NAME}"' in stub)
+    check("the cover line names the file the pack actually writes",
           voicepack.THUMBNAIL_NAME == "thumbnail.png")
     check("no cover is declared when there is no thumbnail to point at",
           voicepack.picture_line(False) == []

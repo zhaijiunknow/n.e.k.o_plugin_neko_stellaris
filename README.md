@@ -130,7 +130,7 @@ python plugin/smoke_offline.py
 | **on_action 的 MERGE 语义成立**（重复顶层名即追加） | `game.log` 里出现 `NEKO\|v1\|heartbeat\|` |
 | **`log` 里的数据引用有效** | `NEKO\|v1\|first_contact_with_empire\|a=联合圣约国\|b=不明帝国\|system=泰伊格\|` |
 | 玩家过滤正确 | 642 条桥接事件全部只属于玩家国家，0 条 AI 国家漏入 |
-| **本地 mod 的封面来自描述符里的 `picture="thumbnail.png"`** | 启动器数据库里该行 `thumbnailPath` 为 NULL，界面就是空封面；工坊 mod 走 Steam API 取图，所以参考 mod 全都没有这个字段——本地 mod 只有这一个来源 |
+| **手装的本地 mod 在启动器里没有封面可设** | 启动器只在有 `thumbnailUrl`（Steam/PDX 服务）时才填 `thumbnailPath`；它对本地 mod 的那条 metadata 路径要求 `formatVersion == 1.1`，而它自己的游戏注册表里 `stellaris` 是 `formatVersion: null`。描述符里的 `picture=` 它根本不读（29 MB 的启动器包里 0 命中） |
 
 ---
 
@@ -141,6 +141,7 @@ python plugin/smoke_offline.py
 3. 屏幕上的**顾问通知文本仍是原版的**——游戏只让 mod 换音频，不让换那行字。
 4. **天灾降临、经济赤字、游戏结束没有 on_action 可挂**。
 5. 免费 TTS 端点**并发限制很严**（2 个并发连接都会吃到 `1008 Too many concurrent requests`），整包生成要十几分钟。
+6. **手装的本地 mod 在启动器里没有封面**：这是启动器的限制，不是 mod 能设的——它只在有 `thumbnailUrl`（走 Steam/PDX 服务）时才填封面，本地 mod 的 `.metadata/thumbnail.png` 那条路又要求 `formatVersion == 1.1`，而群星在启动器注册表里是 `null`。发布于创意工坊后封面就会正常显示（工坊预览图用的正是 mod 根目录的 `thumbnail.png`，上限 1 MiB）。
 
 ---
 

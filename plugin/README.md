@@ -288,7 +288,7 @@ stellaris_live_voice off      # 关掉，退回纯静态语音包
 | 本地化文件必须带 UTF-8 BOM | 原版与参考 mod 的 yml 前 4 字节都是 `EF BB BF 6C 5F` |
 | `log` 效果语法是 `log = "字符串"`，作用域 all | `script_documentation/effects.log` |
 | `is_player` 不是触发器，正确写法是 `is_ai = no` | triggers.log 无此触发器，全库 0 命中；原版 events/ 用了 478 次 |
-| 本地 mod 的封面来自描述符的 `picture="thumbnail.png"` | 启动器数据库该行 `thumbnailPath` 为 NULL = 空封面；带 `picture` 的 `ugc_2941031061.mod` 是唯一显式声明者，其余工坊 mod 靠 Steam API 取图 |
+| 手装的本地 mod 在启动器里**没有**封面可设 | 启动器只在有 `thumbnailUrl` 时才填 `thumbnailPath`（`fetchThumbnail` 里 `if (!e.thumbnailUrl) return null`）；本地 mod 的 `.metadata/thumbnail.png` 那条路要求 `formatVersion == 1.1`，而启动器游戏注册表里 `stellaris` 是 `formatVersion: null`；描述符的 `picture=` 它不读（启动器包内 0 命中）。`picture="thumbnail.png"` 仅作社区约定保留 |
 | on_action 块没有 `limit` 字段 | 过滤只能写进自己事件的 `trigger = {}` |
 
 ### 这些是在真机游戏里被确认（以及推翻）的

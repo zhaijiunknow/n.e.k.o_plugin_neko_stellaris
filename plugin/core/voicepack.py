@@ -566,12 +566,13 @@ def render_localisation(spec: PackSpec, *, language: str, display: str) -> bytes
 def picture_line(has_thumbnail: bool) -> list[str]:
     """The ``picture=`` descriptor line, or nothing when there is no cover.
 
-    This is what gives a *local* mod its cover in the Paradox launcher. Steam mods
-    get a thumbnail through the Steam API, so a mod that omits the field still
-    shows one -- which is exactly why its absence went unnoticed: every reference
-    mod was a Workshop mod. On a purely local install the field is the only source,
-    and without it the launcher stores ``thumbnailPath = NULL`` and draws an empty
-    tile. Relative to the mod directory, matching the game's own mods.
+    Community convention, **not** a launcher mechanism: the Paradox launcher's
+    bundle was searched and it never reads a ``picture`` key. A local mod's cover
+    cannot in fact be set from inside the mod at all -- see ``docs`` in the
+    README's known limitations. The line is emitted anyway because it is what
+    Workshop mods in this install carry (``ugc_2941031061.mod``), because the
+    in-game uploader is a separate program we cannot inspect, and because it costs
+    nothing. It is not what fixes a blank tile, and must not be described as such.
     """
     return [f'picture="{THUMBNAIL_NAME}"'] if has_thumbnail else []
 
@@ -855,9 +856,7 @@ def render_mod_stub(spec: PackSpec, *, has_thumbnail: bool | None = None) -> str
 
     It is the descriptor plus a ``path=`` line telling the launcher where the
     real folder is. Relative paths are resolved against the user data directory,
-    so ``mod/<mod_id>`` is the portable form. ``picture=`` resolves against the
-    mod directory instead, which is why it is written by both this and the
-    in-folder descriptor.
+    so ``mod/<mod_id>`` is the portable form.
     """
     if has_thumbnail is None:
         has_thumbnail = spec.resolved_icon_source() is not None
