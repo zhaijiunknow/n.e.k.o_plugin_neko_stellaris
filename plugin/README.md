@@ -343,7 +343,7 @@ stellaris_live_voice off      # 关掉，退回纯静态语音包
 2. **桥接 mod 的合并假设未经原版文件举证**，靠心跳可验证。
 3. **语音包未在真机游戏内验证过**，只做了结构级核对。
 4. **`log` 里的数据引用会静默失败**：`[This.GetName]` 有时输出真名（实测 `astral_planes_events.txt:231`），有时塌成空串且不报错（实测 `00_scripted_effects.txt:6256`）。所以事件载荷的解析**绝不依赖名字**，空值会被跳过。
-5. **免费 TTS 端点并发限制很严**：4 个并发连接会吃到 `1008 Too many concurrent requests`。已降到 2 并发并对限流单独做长退避，但整包生成仍然要几分钟。
+5. **免费 TTS 端点限流罚的是连接数**：实测单连接连发 16 条零错误、0.54s/条；每条重开连接（哪怕只开 2 条）约一半请求吃 `1008 Too many concurrent requests`，每次重试几秒退避。现在整批复用一条连接（`TtsSession`），248 条约 3 分钟，实测 0 次限流重试。
 6. **天灾降临、经济赤字、游戏结束没有 on_action 可挂**，只能在原版事件选择的粒度上近似。
 7. 屏幕上的**顾问通知文本仍是原版的**——游戏只让 mod 换音频，不让换那行字。
 
@@ -379,7 +379,7 @@ python plugin/plugins/neko_stellaris/build_cli.py combined --name "由依" --ins
 .venv\Scripts\python.exe plugin\plugins\neko_stellaris\smoke_offline.py
 ```
 
-在宿主里是 193 项检查；从独立仓库直接跑是 191 项通过 + 2 项跳过——那两项要经插件入口读 `Settings`，需要宿主 SDK，缺了它会**显式报告跳过**而不是静默少算。命令在两种布局下都能跑：宿主里用上面那条路径，从独立仓库跑则是 `python plugin/smoke_offline.py`。
+在宿主里是 200 项检查；从独立仓库直接跑是 198 项通过 + 2 项跳过——那两项要经插件入口读 `Settings`，需要宿主 SDK，缺了它会**显式报告跳过**而不是静默少算。命令在两种布局下都能跑：宿主里用上面那条路径，从独立仓库跑则是 `python plugin/smoke_offline.py`。
 
 **不联网、不碰 TTS、不碰游戏**，断言的是插件产出的**格式**——因为这里才是昂贵的错误所在：一个没有覆盖全部可达声音的 soundgroup、一个少了 BOM 的本地化文件、一个头部与原版不符的 DDS、一个没有任何 on_action 会触发的桥接事件。
 
@@ -416,7 +416,7 @@ plugin/plugins/neko_stellaris/
 │   └── persona_brief.md     人设结论（自称「本喵」、称玩家「碳基生物」的来源）
 ├── assets/                  顾问图标原图（游戏内 DDS 与工坊缩略图的上游）
 ├── build_cli.py             不依赖宿主的命令行入口
-├── smoke_offline.py         191 项离线回归检查（宿主内 193）
+├── smoke_offline.py         198 项离线回归检查（宿主内 200）
 └── i18n/
 ```
 
