@@ -1224,6 +1224,125 @@ def test_bridge_scope_links() -> None:
           and "exists = owner owner" not in rendered)
 
 
+def test_tts_session() -> None:
+    """A batch reuses one connection, and turn boundaries stay in sync.
+
+    Both properties are load-bearing and neither is visible in the output, which
+    is why they are tested against a local fake endpoint instead of the real one:
+      * the limiter counts *connections*, so opening one per line is what made a
+        full pack spend most of its wall clock in backoff;
+      * ``tts.response.done`` arrives *after* ``tts.response.audio.done``, so a
+        client that stops at the audio one leaves the turn message queued and the
+        next line reads it as its own completion, returning no audio at all.
+    """
+    section("tts session reuse")
+    import asyncio
+    import base64
+    import json as _json
+    import tempfile
+
+    from core import tts as tts_core
+
+    try:
+        import websockets
+    except ImportError:  # pragma: no cover - dependency is in the venv
+        skip("tts session reuse", "websockets 不可用")
+        return
+    # The fake server logs every accept at INFO, which would bury the checks.
+    import logging
+
+    logging.getLogger("websockets.server").setLevel(logging.WARNING)
+
+    wav = tts_core._wrap_pcm16(b"\x00\x01" * 240, 24000)
+    payload = base64.b64encode(wav).decode()
+    state = {"connections": 0, "lines": 0, "fail_at": 0}
+
+    async def handler(ws):
+        state["connections"] += 1
+        sid = f"s{state['connections']}"
+        await ws.send(_json.dumps({"type": "tts.connection.done",
+                                   "data": {"session_id": sid}}))
+        try:
+            while True:
+                raw = await ws.recv()
+                if isinstance(raw, bytes):
+                    continue
+                kind = _json.loads(raw).get("type")
+                if kind != "tts.text.done":
+                    continue
+                state["lines"] += 1
+                if state["fail_at"] and state["lines"] == state["fail_at"]:
+                    await ws.send(_json.dumps({"type": "tts.response.error",
+                                               "data": "provider said no"}))
+                    continue
+                await ws.send(_json.dumps({"type": "tts.response.audio.delta",
+                                           "data": {"audio": payload}}))
+                await ws.send(_json.dumps({"type": "tts.response.audio.done",
+                                           "data": {"session_id": sid}}))
+                await ws.send(_json.dumps({"type": "tts.response.done",
+                                           "data": {"session_id": sid}}))
+        except Exception:  # noqa: BLE001 - the client closed, which is normal here
+            return
+
+    def _settings(port: int) -> "tts_core.TtsSettings":
+        return tts_core.TtsSettings(url=f"ws://127.0.0.1:{port}", api_key="k",
+                                    voice_id="test-voice", timeout_s=5.0)
+
+    async def batch() -> dict:
+        server = await websockets.serve(handler, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        settings = _settings(port)
+        items = [(f"slot_{i}", f"line {i}") for i in range(5)]
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = pathlib.Path(tmp)
+            first = await tts_core.synthesize_many(items, settings, cache_dir=cache)
+            after_first = state["connections"]
+            again = await tts_core.synthesize_many(items, settings, cache_dir=cache)
+        server.close()
+        await server.wait_closed()
+        return {"connections": after_first, "now": state["connections"],
+                "first": first, "again": again}
+
+    got = asyncio.run(batch())
+    check("a five-line batch opens exactly one connection",
+          got["connections"] == 1, f"{got['connections']} 个连接")
+    check("every line in the batch came back with audio",
+          len(got["first"]) == 5 and all(pcm for pcm, _ in got["first"].values()),
+          f"{sum(1 for pcm, _ in got['first'].values() if pcm)}/5 有音频")
+    check("a fully cached batch opens no connection at all",
+          got["now"] == got["connections"],
+          f"多出 {got['now'] - got['connections']} 个连接")
+    check("the cached batch still returns every line", len(got["again"]) == 5)
+
+    state.update({"connections": 0, "lines": 0, "fail_at": 2})
+
+    async def recovery() -> tuple[bool, bool, bool, int]:
+        server = await websockets.serve(handler, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        session = tts_core.TtsSession(_settings(port))
+        try:
+            first = bool((await session.speak("a"))[0])
+            raised = False
+            try:
+                await session.speak("b")
+            except Exception:  # noqa: BLE001 - the fake endpoint fails this turn
+                raised = True
+            still_open = session.connected
+            second = bool((await session.speak("c"))[0])
+        finally:
+            await session.close()
+            server.close()
+            await server.wait_closed()
+        return raised, still_open, first and second, state["connections"]
+
+    raised, still_open, recovered, connections = asyncio.run(recovery())
+    check("a failed turn raises instead of returning empty audio", raised)
+    check("a failed turn closes the session, so the retry cannot reuse it",
+          not still_open)
+    check("and the same object recovers by reconnecting",
+          recovered and connections == 2, f"{connections} 个连接")
+
+
 def main() -> int:
     print("neko_stellaris offline smoke suite")
     test_voice_plan()
@@ -1242,6 +1361,7 @@ def main() -> int:
     test_layout_independence()
     test_published_copy()
     test_bridge_scope_links()
+    test_tts_session()
 
     print()
     print("=" * 60)

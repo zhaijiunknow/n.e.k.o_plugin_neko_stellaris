@@ -54,7 +54,7 @@ DEFAULT_SAMPLE_RATE = 24000
 # simultaneous sockets earn a `1008 (policy violation) Too many concurrent
 # requests` close, which is measured behaviour, not caution. Two in flight keeps
 # a 250-clip pack to roughly ten minutes without provoking the limiter.
-DEFAULT_CONCURRENCY = 2
+DEFAULT_CONCURRENCY = 1
 _MAX_ATTEMPTS = 6
 _BACKOFF_BASE_S = 1.5
 # Rate-limit rejections are not transient in the same way a dropped socket is:
@@ -126,70 +126,112 @@ def _merge_delta(accumulated: bytes, incoming: bytes) -> bytes:
     return accumulated + incoming
 
 
-async def synthesize_raw(text: str, settings: TtsSettings) -> tuple[bytes, int]:
-    """Synthesize one line and return (pcm16_bytes, sample_rate).
+class TtsSession:
+    """One websocket plus one provider session, reused for many lines.
 
-    ``pcm16_bytes`` is raw little-endian 16-bit PCM at the provider's rate, with
-    any multi-delta segments already merged. Nothing is resampled here; the
-    caller decides the final rate.
+    The free endpoint's limiter counts *connections*, not requests. Measured
+    against it: sixteen lines back to back on one session produced no rejections
+    and cost 0.54s each, while opening a connection per line -- even only two at a
+    time -- earns ``1008 (policy violation) Too many concurrent requests`` on
+    roughly half of them, and each rejection costs a multi-second backoff. The
+    batch then spends most of its wall clock waiting.
+
+    Same measurements, same endpoint: connect + handshake ~0.20s, first line
+    ~1.1s, every line after that ~0.55s. So a full 248-clip pack goes from
+    ~8-9 minutes to ~2-3.
+
+    A session is deliberately not shared between concurrent workers: one connection
+    at a time is what the limiter tolerates.
     """
-    try:
-        import websockets
-    except ImportError as exc:  # pragma: no cover - dependency is in the venv
-        raise TtsError("websockets 不可用，无法合成语音") from exc
 
-    if not text.strip():
-        raise TtsError("空文本")
-    if not settings.voice_id.strip():
-        raise TtsError("缺少 voice_id")
+    def __init__(self, settings: TtsSettings) -> None:
+        self._settings = settings
+        self._ws: Any = None
+        self._session_id = ""
+        self._created = False
+        self.lines = 0
 
-    headers = {"Authorization": f"Bearer {settings.api_key or ''}"}
-    pcm = b""
-    rate = settings.sample_rate
-    width = 2
-    channels = 1
+    @property
+    def connected(self) -> bool:
+        return self._ws is not None and self._created
 
-    async def _run() -> tuple[bytes, int]:
-        nonlocal pcm, rate, width, channels
-        async with websockets.connect(
-            settings.url, additional_headers=headers, open_timeout=15,
-        ) as ws:
-            session_id = ""
-            while True:
-                raw = await asyncio.wait_for(ws.recv(), timeout=10.0)
-                if isinstance(raw, bytes):
-                    continue
-                event = json.loads(raw)
-                kind = event.get("type")
-                if kind == "tts.connection.done":
-                    session_id = (event.get("data") or {}).get("session_id") or ""
-                    break
-                if kind == "tts.response.error":
-                    raise TtsError(f"握手失败: {event.get('data')}")
+    async def _connect(self) -> None:
+        try:
+            import websockets
+        except ImportError as exc:  # pragma: no cover - dependency is in the venv
+            raise TtsError("websockets 不可用，无法合成语音") from exc
 
-            if not session_id:
-                raise TtsError("TTS 未返回 session_id")
+        settings = self._settings
+        headers = {"Authorization": f"Bearer {settings.api_key or ''}"}
+        ws = await websockets.connect(settings.url, additional_headers=headers,
+                                      open_timeout=15)
+        self._ws = ws
+        while True:
+            raw = await asyncio.wait_for(ws.recv(), timeout=10.0)
+            if isinstance(raw, bytes):
+                continue
+            event = json.loads(raw)
+            kind = event.get("type")
+            if kind == "tts.connection.done":
+                self._session_id = (event.get("data") or {}).get("session_id") or ""
+                break
+            if kind == "tts.response.error":
+                raise TtsError(f"握手失败: {event.get('data')}")
+        if not self._session_id:
+            raise TtsError("TTS 未返回 session_id")
 
-            create: dict[str, Any] = {
-                "session_id": session_id,
-                "voice_id": settings.voice_id,
-                "response_format": "wav",
-                "sample_rate": settings.sample_rate,
-            }
-            if settings.language_code:
-                create["language_code"] = settings.language_code
-            await ws.send(json.dumps({"type": "tts.create", "data": create}))
+        create: dict[str, Any] = {
+            "session_id": self._session_id,
+            "voice_id": settings.voice_id,
+            "response_format": "wav",
+            "sample_rate": settings.sample_rate,
+        }
+        if settings.language_code:
+            create["language_code"] = settings.language_code
+        await ws.send(json.dumps({"type": "tts.create", "data": create}))
+        self._created = True
+
+    async def close(self) -> None:
+        ws, self._ws = self._ws, None
+        self._created = False
+        self._session_id = ""
+        if ws is not None:
+            try:
+                await ws.close()
+            except Exception:  # noqa: BLE001 - closing must never mask the real error
+                pass
+
+    async def speak(self, text: str) -> tuple[bytes, int]:
+        """Synthesize one line, returning (pcm16_bytes, sample_rate).
+
+        Any failure closes the session: the turn is then desynchronised, and a
+        retry that reuses it would read the abandoned response as its own.
+        """
+        if not text.strip():
+            raise TtsError("空文本")
+        if not self._settings.voice_id.strip():
+            raise TtsError("缺少 voice_id")
+        if not self.connected:
+            await self.close()
+            await self._connect()
+        ws = self._ws
+        if ws is None:  # pragma: no cover - _connect sets it or raises
+            raise TtsError("TTS 会话未建立")
+
+        pcm = b""
+        rate = self._settings.sample_rate
+        try:
             await ws.send(json.dumps({
                 "type": "tts.text.delta",
-                "data": {"session_id": session_id, "text": text},
+                "data": {"session_id": self._session_id, "text": text},
             }))
             await ws.send(json.dumps({
                 "type": "tts.text.done",
-                "data": {"session_id": session_id},
+                "data": {"session_id": self._session_id},
             }))
 
             while True:
-                raw = await asyncio.wait_for(ws.recv(), timeout=settings.timeout_s)
+                raw = await asyncio.wait_for(ws.recv(), timeout=self._settings.timeout_s)
                 if isinstance(raw, bytes):
                     continue
                 event = json.loads(raw)
@@ -203,22 +245,44 @@ async def synthesize_raw(text: str, settings: TtsSettings) -> tuple[bytes, int]:
                             chunk = decode_wav_bytes(base64.b64decode(blob))
                         except (AudioError, ValueError) as exc:
                             raise TtsError(f"音频块无法解析: {exc}") from exc
-                        rate, width, channels = chunk.rate, 2, 1
+                        rate = chunk.rate
                         pcm = _merge_delta(pcm, to_pcm16_bytes(chunk.samples))
-                elif kind in ("tts.response.done", "tts.response.audio.done"):
+                elif kind == "tts.response.done":
+                    # The end of the *turn*, not of the audio: ``audio.done`` comes
+                    # first and this closes the response. Waiting for this one is
+                    # what keeps the next line in sync -- breaking at ``audio.done``
+                    # leaves this message queued, and the next call reads it as its
+                    # own completion and returns no audio at all.
                     break
+        except asyncio.TimeoutError as exc:
+            await self.close()
+            raise TtsError("TTS 超时") from exc
+        except Exception:
+            await self.close()
+            raise
+
+        if not pcm:
+            await self.close()
+            raise TtsError("TTS 未返回音频")
+        self.lines += 1
         return pcm, rate
 
-    try:
-        pcm, rate = await asyncio.wait_for(_run(), timeout=settings.timeout_s * 2)
-    except TtsError:
-        raise
-    except asyncio.TimeoutError as exc:
-        raise TtsError("TTS 超时") from exc
 
-    if not pcm:
-        raise TtsError("TTS 未返回音频")
-    return pcm, rate
+async def synthesize_raw(text: str, settings: TtsSettings) -> tuple[bytes, int]:
+    """Synthesize one line and return (pcm16_bytes, sample_rate).
+
+    ``pcm16_bytes`` is raw little-endian 16-bit PCM at the provider's rate, with
+    any multi-delta segments already merged. Nothing is resampled here; the
+    caller decides the final rate.
+
+    One line per call, so this opens and closes a session; batch callers should
+    keep a :class:`TtsSession` instead and pay the handshake once.
+    """
+    session = TtsSession(settings)
+    try:
+        return await session.speak(text)
+    finally:
+        await session.close()
 
 
 def _is_rate_limited(exc: Exception) -> bool:
@@ -271,18 +335,25 @@ class Pacer:
 
 async def synthesize_with_retry(text: str, settings: TtsSettings,
                                 *, label: str = "",
-                                pacer: Pacer | None = None) -> tuple[bytes, int]:
+                                pacer: Pacer | None = None,
+                                session: "TtsSession | None" = None) -> tuple[bytes, int]:
     """``synthesize_raw`` with bounded exponential backoff.
 
     Rate-limit rejections back off on a longer ladder than ordinary failures,
     because retrying a concurrency rejection at the normal cadence simply trips
     the same guard again -- and they also widen ``pacer`` for the whole batch.
+
+    Pass ``session`` to reuse an open connection. A failed turn closes it, so the
+    retry below reconnects on its own; that is deliberate, since a session whose
+    turn was abandoned cannot be trusted to line its next response up.
     """
     last: Exception | None = None
     for attempt in range(_MAX_ATTEMPTS):
         if pacer is not None:
             await pacer.wait()
         try:
+            if session is not None:
+                return await session.speak(text)
             return await synthesize_raw(text, settings)
         except Exception as exc:  # noqa: BLE001 - provider errors are open-ended
             last = exc
@@ -398,9 +469,11 @@ async def synthesize_many(
 
     lock = asyncio.Lock()
     semaphore = asyncio.Semaphore(max(1, settings.concurrency))
-    # Start already spaced: the limiter rejects the very first burst otherwise,
-    # and every rejection costs a multi-second backoff before the batch settles.
-    pacer = Pacer(initial_gap=0.8)
+    # No opening delay any more: it existed to soften the burst of *connections*
+    # a batch used to open, and a batch now opens one. It still widens itself on a
+    # rejection, so a limiter that turns out to be rate-based rather than
+    # connection-based is discovered by the first rejection instead of assumed.
+    pacer = Pacer(initial_gap=0.0)
     completed = 0
 
     def _cache_path(key: str, text: str) -> Path | None:
@@ -408,7 +481,7 @@ async def synthesize_many(
             return None
         return cache_path(settings, key, text, cache_dir)
 
-    async def _one(key: str, text: str) -> None:
+    async def _one(key: str, text: str, session: "TtsSession") -> None:
         nonlocal completed
         path = _cache_path(key, text)
         if path is not None and path.exists() and path.stat().st_size > 44:
@@ -431,7 +504,7 @@ async def synthesize_many(
         async with semaphore:
             try:
                 pcm, rate = await synthesize_with_retry(text, settings, label=key,
-                                                        pacer=pacer)
+                                                        pacer=pacer, session=session)
             except Exception as exc:  # noqa: BLE001
                 async with lock:
                     stats.failed += 1
@@ -460,7 +533,28 @@ async def synthesize_many(
             if on_progress:
                 on_progress(completed, total, key)
 
-    await asyncio.gather(*(_one(key, text) for key, text in items))
+    # One long-lived session per worker. The limiter counts connections, so the
+    # number of workers is the number of connections the endpoint sees at once --
+    # which is why the default is 1 and why a worker keeps its session instead of
+    # opening one per line.
+    workers = max(1, settings.concurrency)
+    queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+    for item in items:
+        queue.put_nowait(item)
+
+    async def _worker() -> None:
+        session = TtsSession(settings)
+        try:
+            while True:
+                try:
+                    key, text = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                await _one(key, text, session)
+        finally:
+            await session.close()
+
+    await asyncio.gather(*(_worker() for _ in range(workers)))
     if pacer.rejections:
         logger.info("本批次遇到 %d 次限流，最终请求间隔收敛到 %.2fs",
                     pacer.rejections, pacer.gap)
