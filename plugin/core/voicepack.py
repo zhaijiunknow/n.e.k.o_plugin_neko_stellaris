@@ -240,15 +240,27 @@ class PackPlan:
 def _variant_sound_name(base: str, index: int) -> str:
     """Name for the ``index``-th take (1-based) of a base sound.
 
-    Vanilla's own extras use a plain ``_02``/``_03`` suffix, and because only one
-    advisor voice group is active at a time, re-using those names is safe even
-    though other groups define their own.
+    Takes after the first must be *invented*, and an invented sound name has to be
+    spelled so vanilla cannot already own it.
+
+    The obvious ``_02``/``_03`` spelling was wrong, and silently so: vanilla
+    declares ``advisor_notification_x_02`` itself in ``soundgroups.asset``, as an
+    extra reference to the same wav, so that the ethics voices' weighted pools
+    (``_01`` weight 1000 + ``_02`` weight 800) can bias a line. Top-level ``sound``
+    blocks are global, so our redeclaration of those names lost the collision --
+    the engine logged "already scripted" 102 times and kept vanilla's file. Each
+    pool then listed one name pointing at our audio and three pointing at vanilla's,
+    so three draws in four played the *original* advisor in the middle of a YUI
+    pool. That is what "some lines are missing" was.
+
+    A ``_neko_`` infix cannot collide: no vanilla sound name contains it, and the
+    suffix is no longer a bare two-digit number that vanilla's alias scheme could
+    grow into.
     """
     if index <= 1:
         return base
-    if base.endswith("_01"):
-        return f"{base[:-2]}{index:02d}"
-    return f"{base}_v{index}"
+    stem = base[:-3] if base.endswith("_01") else base
+    return f"{stem}_neko_{index:02d}"
 
 
 def _effect_member_counts(dataset: dict[str, Any]) -> dict[str, int]:

@@ -310,6 +310,7 @@ stellaris_live_voice off      # 关掉，退回纯静态语音包
 | `log` 效果语法是 `log = "字符串"`，作用域 all | `script_documentation/effects.log` |
 | `is_player` 不是触发器，正确写法是 `is_ai = no` | triggers.log 无此触发器，全库 0 命中；原版 events/ 用了 478 次 |
 | 手装的本地 mod 在启动器里**没有**封面可设 | 启动器只在有 `thumbnailUrl` 时才填 `thumbnailPath`（`fetchThumbnail` 里 `if (!e.thumbnailUrl) return null`）；本地 mod 的 `.metadata/thumbnail.png` 那条路要求 `formatVersion == 1.1`，而启动器游戏注册表里 `stellaris` 是 `formatVersion: null`；描述符的 `picture=` 它不读（启动器包内 0 命中）。`picture="thumbnail.png"` 仅作社区约定保留 |
+| **顶层 `sound` 块是全局的，重名时先声明者胜** | 自造的变体名写成 `advisor_..._02` 这类与原版同形的名字，与 `soundgroups.asset` 里为流派语音池准备的别名撞名，error.log 报 102 行 `Sound 'X' already scripted, second occurance at 'sound/nekko_stellaris_advisor.asset'` —— 引擎保留先声明的原版那份，于是每个池子 4 个候选有 3 个播的是原版顾问。组内的 `soundfileoverrides` / `soundeffectoverrides` 才是组作用域（只影响自己这一路语音，不动原版） |
 | on_action 块没有 `limit` 字段 | 过滤只能写进自己事件的 `trigger = {}` |
 
 ### 这些是在真机游戏里被确认（以及推翻）的
@@ -377,7 +378,7 @@ python plugin/plugins/neko_stellaris/build_cli.py combined --name "由依" --ins
 .venv\Scripts\python.exe plugin\plugins\neko_stellaris\smoke_offline.py
 ```
 
-在宿主里是 187 项检查；从独立仓库直接跑是 185 项通过 + 2 项跳过——那两项要经插件入口读 `Settings`，需要宿主 SDK，缺了它会**显式报告跳过**而不是静默少算。命令在两种布局下都能跑：宿主里用上面那条路径，从独立仓库跑则是 `python plugin/smoke_offline.py`。
+在宿主里是 189 项检查；从独立仓库直接跑是 187 项通过 + 2 项跳过——那两项要经插件入口读 `Settings`，需要宿主 SDK，缺了它会**显式报告跳过**而不是静默少算。命令在两种布局下都能跑：宿主里用上面那条路径，从独立仓库跑则是 `python plugin/smoke_offline.py`。
 
 **不联网、不碰 TTS、不碰游戏**，断言的是插件产出的**格式**——因为这里才是昂贵的错误所在：一个没有覆盖全部可达声音的 soundgroup、一个少了 BOM 的本地化文件、一个头部与原版不符的 DDS、一个没有任何 on_action 会触发的桥接事件。
 
@@ -414,7 +415,7 @@ plugin/plugins/neko_stellaris/
 │   └── persona_brief.md     人设结论（自称「本喵」、称玩家「碳基生物」的来源）
 ├── assets/                  顾问图标原图（游戏内 DDS 与工坊缩略图的上游）
 ├── build_cli.py             不依赖宿主的命令行入口
-├── smoke_offline.py         185 项离线回归检查（宿主内 187）
+├── smoke_offline.py         187 项离线回归检查（宿主内 189）
 └── i18n/
 ```
 

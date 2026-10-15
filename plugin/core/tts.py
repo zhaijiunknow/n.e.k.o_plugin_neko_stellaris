@@ -302,22 +302,48 @@ async def synthesize_with_retry(text: str, settings: TtsSettings,
 ProgressFn = Callable[[int, int, str], None]
 
 
-def cache_key(settings: TtsSettings, slot: str, text: str) -> str:
-    """Content address of one clip: everything that changes what it sounds like.
+def cache_key(settings: TtsSettings, text: str) -> str:
+    """Content address of one clip: exactly what changes what it sounds like.
 
     Voice, endpoint, sample rate and language are part of the fingerprint, so
-    switching the character's voice invalidates every clip while editing a
-    single line invalidates exactly one. Knowing that difference is what lets
-    the startup check say "248 clips to redo" versus "3 clips to redo" before
-    committing to the work.
+    switching the character's voice invalidates every clip while editing a single
+    line invalidates exactly one. Knowing that difference is what lets the startup
+    check say "248 clips to redo" versus "3 clips to redo" before committing to the
+    work.
+
+    The slot name is deliberately *not* part of it. It used to be, and the cost was
+    invisible until the take naming had to change: renaming a slot re-synthesized
+    audio that was already on disk, byte-identical, against a rate-limited
+    endpoint. A rename is not supposed to cost money. :func:`legacy_cache_key`
+    exists only to find files written under the old scheme.
     """
+    digest = hashlib.sha256(
+        f"{settings.fingerprint()}|{text}".encode("utf-8")).hexdigest()
+    return digest[:24]
+
+
+def legacy_cache_key(settings: TtsSettings, slot: str, text: str) -> str:
+    """The key shape used while the slot name was still part of it."""
     digest = hashlib.sha256(
         f"{settings.fingerprint()}|{slot}|{text}".encode("utf-8")).hexdigest()
     return digest[:24]
 
 
 def cache_path(settings: TtsSettings, slot: str, text: str, cache_dir: str | Path) -> Path:
-    return Path(cache_dir) / f"{cache_key(settings, slot, text)}.wav"
+    base = Path(cache_dir)
+    path = base / f"{cache_key(settings, text)}.wav"
+    if path.is_file():
+        return path
+    # Adopt a clip recorded under the old key rather than paying for it again.
+    # Renamed in place, so this shim runs once per file and then finds nothing.
+    stale = base / f"{legacy_cache_key(settings, slot, text)}.wav"
+    if stale.is_file():
+        try:
+            stale.rename(path)
+            return path
+        except OSError:
+            return stale
+    return path
 
 
 def count_cache_misses(

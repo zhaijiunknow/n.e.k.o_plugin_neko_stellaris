@@ -318,6 +318,20 @@ def test_voice_pack_files() -> None:
     check("no take name is declared twice",
           declaration_blocks == len(declared),
           f"{declaration_blocks} blocks for {len(declared)} declarations")
+
+    # A take we invent must be spelled so vanilla cannot already own that name.
+    # Vanilla declares ``advisor_notification_x_02`` itself in soundgroups.asset,
+    # as a second reference to the same wav for the ethics voices' weighted pools,
+    # and top-level ``sound`` blocks are global: our redeclaration lost the
+    # collision (102 "already scripted" lines), so those pool entries played the
+    # original advisor. Anything matching vanilla's alias shape is a repeat of it.
+    vanilla_shaped = sorted(n for n in declared
+                            if re.search(r"_\d\d$", n) and "_neko_" not in n)
+    check("no declared take reuses vanilla's alias spelling",
+          not vanilla_shaped, f"{len(vanilla_shaped)} e.g. {vanilla_shaped[:3]}")
+    check("every declared take is namespaced to this mod",
+          all("_neko_" in n for n in declared),
+          f"{[n for n in declared if '_neko_' not in n][:3]}")
     check("exactly one soundgroup block", asset.count("soundgroup = {") == 1)
     check("soundgroup declares our name once",
           asset.count(f"name = {spec.voice_group}") == 1)
