@@ -129,7 +129,13 @@ GOAL_FILTERS: dict[str, str] = {
     "special_project_completed_astral_rift": COUNTRY_THIS,
     # -- diplomacy ------------------------------------------------------- #
     "first_contact_with_empire": COUNTRY_THIS,
-    "first_contact_finished": COUNTRY_THIS,
+    # ``this`` here is the first-contact *process*, not a country: the on_action's
+    # own comment says "This = first contact scope / From = other country", and the
+    # vanilla events fired there all reach the country through ``owner``. Filtering
+    # with ``this = { is_ai = no }`` evaluated is_ai on a non-country scope, which
+    # the engine rejects -- and because this hook never fired in the session that
+    # exposed the other scope bugs, nothing ever reported it.
+    "first_contact_finished": OWNER_THIS,
     "communications_established": COUNTRY_THIS,
     "federation_joined_or_formed": COUNTRY_THIS,  # this = federation leader
     "federation_left": COUNTRY_THIS,
