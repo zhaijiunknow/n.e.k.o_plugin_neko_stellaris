@@ -966,6 +966,20 @@ async def build_pack(
     # 3. Static files.
     phases("写入 mod 清单与资源定义")
     clip_names = [job.sound for job in jobs if job.sound not in missing]
+
+    # Drop clips from an earlier build whose names left the plan. Nothing
+    # references them -- the asset is rewritten from `clip_names` alone -- but they
+    # still ship: renaming the takes left their 166 predecessors in place and the
+    # mod silently grew from 36 MiB to 62 MiB, with every referenced file present
+    # and correct, so nothing looked wrong until the install reported the size.
+    keep = set(clip_names)
+    stale = sorted(p for p in vo_dir.glob("*.wav") if p.stem not in keep)
+    for path in stale:
+        path.unlink()
+    if stale:
+        logger.info("清理了 %d 个已不在计划内的旧音频：%s",
+                    len(stale), [p.stem for p in stale[:4]])
+
     (out / "sound").mkdir(parents=True, exist_ok=True)
     (out / "sound" / f"{plan.spec.mod_id}.asset").write_text(
         render_soundgroup_asset(plan, clip_names), encoding="utf-8", newline="\n")
