@@ -193,9 +193,9 @@
       "scope_source": "文件内注释 2682-2683 行: '# A country has increased the level of a tech, use last_increased_tech trigger to check tech and level. / # This = Country'",
       "fires_for": "all_countries",
       "needs_limit": "trigger = { is_ai = no }  —— 必须加，否则每个 AI 每研究一个科技都会刷一条，这是全表噪声最大的 hook",
-      "recommended_log_text": "NEKO|tech|country=[This.GetName]|tech=[This.last_increased_tech]",
+      "recommended_log_text": "NEKO|tech|country=[This.GetName]",
       "confidence": "verified",
-      "notes": "Stellaris 没有 on_technology_researched。要具体科技名，用触发器 last_increased_tech（triggers.log 第 292 行）——但注意触发器不能直接当数据引用写进 [ ] 里，正确做法是在事件里用 if/else 或变量缓存后再输出。'科技等级提升'也算，重复科技会重复触发",
+      "notes": "Stellaris 没有 on_technology_researched。要具体科技名，用触发器 last_increased_tech（triggers.log 第 292 行）——但注意触发器不能直接当数据引用写进 [ ] 里，正确做法是在事件里用 if/else 或变量缓存后再输出。'科技等级提升'也算，重复科技会重复触发 科技名取不到：last_increased_tech 是触发器值，不是可插值访问器 —— 全库 211 处用法全是 last_increased_tech = <tech_key> 这种比较，本地化里也从没插值过它；on_tech_increased 只提供 this = country，没有任何 on_action 的注释给出 technology 作用域。所以这一行只记国家，不记科技名（实测 561/561 行该字段为空）。",
       "event_type": "country_event",
       "event_type_source": "原版在该 on_action 上触发的 66 个事件均声明为 country_event"
     },

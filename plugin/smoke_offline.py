@@ -1205,6 +1205,23 @@ def test_bridge_scope_links() -> None:
     check("every scope link is documented by the hook's audit, or guarded",
           not violations, f"{len(violations)} e.g. {violations[:4]}")
 
+    # Existence is not enough: the link also has to lead somewhere ``is_ai`` means
+    # anything. ``owner`` is exempt because it is guarded and because a scope's
+    # audited text names the meaningful scopes, not every link a colony or station
+    # offers; for the rest the audit has to describe a country.
+    countryish = re.compile(r"country|国家|帝国|玩家|领袖|leader", re.I)
+    wrong_type: list[tuple[str, str, str]] = []
+    for hook in plan.hooks:
+        scope_text = str(audited.get(hook.goal, {}).get("scope") or "")
+        for link in re.findall(r"(?m)^(\w+)\s*=\s*\{\s*\n?\s*is_ai", hook.trigger):
+            if link == "owner":
+                continue
+            described = re.search(rf"\b{link}\s*=\s*([^,，)）]+)", scope_text, re.I)
+            if described and not countryish.search(described.group(1)):
+                wrong_type.append((hook.goal, link, described.group(1).strip()))
+    check("a filter only applies is_ai to a scope the audit calls a country",
+          not wrong_type, f"{len(wrong_type)} e.g. {wrong_type[:3]}")
+
     # The guard has to be a statement the engine evaluates *before* the switch.
     owner_switches = [h for h in plan.hooks
                       if re.search(r"(?m)^owner\s*=\s*\{", h.trigger)]
@@ -1222,6 +1239,13 @@ def test_bridge_scope_links() -> None:
     check("the rendered file keeps the guard and the switch on separate lines",
           "\t\texists = owner\n\t\towner = { is_ai = no }" in rendered
           and "exists = owner owner" not in rendered)
+    # A log template may only reference things the engine can actually turn into a
+    # string. `last_increased_tech` is a trigger value -- all 211 uses of it in the
+    # game compare it against a literal tech key, and nothing localises or
+    # interpolates it -- so `[This.last_increased_tech]` renders empty on every
+    # single line, which is exactly what it did for 561 of 561 tech events.
+    check("no log template interpolates a trigger value",
+          "last_increased_tech" not in rendered)
 
 
 def test_tts_session() -> None:

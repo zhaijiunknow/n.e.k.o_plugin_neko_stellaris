@@ -209,6 +209,8 @@ def _parse_bridge(line: str) -> GameEvent | None:
         if not chunk:
             continue
         key, sep, value = chunk.partition("=")
+        if not sep:
+            continue
         if sep:
             fields[key.strip()] = value.strip()
 
