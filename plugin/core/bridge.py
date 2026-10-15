@@ -68,7 +68,21 @@ BRIDGE_VERSION = "v1"
 # log. Everything here corresponds to a `verified` row in on_action_hooks.json.
 COUNTRY_THIS = "this = { is_ai = no }"
 COUNTRY_ROOT = "root = { is_ai = no }"
-OWNER_THIS = "owner = { is_ai = no }"
+# ``exists`` first, and it is not decoration. Several of these on_actions fire in a
+# scope whose ``owner`` link is legitimately absent -- a planet surveyed before
+# anyone colonised it, a neutral starbase, a station that was just destroyed. An
+# unguarded switch there does not fail quietly: the engine logs
+# "Invalid context switch [owner] from <planet>" on every single firing, which was
+# 32,383 lines in one session from one event, plus 109 from another.
+#
+# The guard also states the intent correctly: a thing with no owner is not the
+# player's, so the hook should simply not fire.
+OWNER_THIS = "exists = owner\nowner = { is_ai = no }"
+# Same failure, different link: on_planet_surveyed documents `Root = Planet,
+# From = Country`, so the surveying country is `from` -- and `from` can be absent
+# too, because the comment notes it can fire "without a ship through changes in
+# intel levels".
+FROM_COUNTRY = "exists = from\nfrom = { is_ai = no }"
 
 GOAL_FILTERS: dict[str, str] = {
     # -- war ------------------------------------------------------------- #
@@ -107,7 +121,7 @@ GOAL_FILTERS: dict[str, str] = {
     # -- science --------------------------------------------------------- #
     "tech_researched": COUNTRY_THIS,
     "survey_completed_system": COUNTRY_ROOT,
-    "survey_completed_planet": OWNER_THIS,
+    "survey_completed_planet": FROM_COUNTRY,        # root = planet, from = country
     "special_project_completed_debris": COUNTRY_THIS,
     "special_project_completed_modification": COUNTRY_THIS,
     "special_project_completed_uplift": OWNER_THIS,
@@ -300,7 +314,7 @@ def render_events_file(plan: BridgePlan) -> str:
             "\thide_window = yes",
             "\tis_triggered_only = yes",
             "\ttrigger = {",
-            f"\t\t{COUNTRY_THIS}",
+            *(f"\t\t{line}" for line in COUNTRY_THIS.splitlines()),
             "\t}",
             "\timmediate = {",
             f'\t\tlog = "NEKO|{BRIDGE_VERSION}|heartbeat|"',
@@ -319,7 +333,7 @@ def render_events_file(plan: BridgePlan) -> str:
             "\thide_window = yes",
             "\tis_triggered_only = yes",
             "\ttrigger = {",
-            f"\t\t{hook.trigger}",
+            *(f"\t\t{line}" for line in hook.trigger.splitlines()),
             "\t}",
             "\timmediate = {",
             f'\t\tlog = "{hook.log_text}"',

@@ -1174,6 +1174,56 @@ def test_published_copy() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_bridge_scope_links() -> None:
+    """A trigger may only switch through a link the on_action actually provides.
+
+    Switching through an absent one is not a quiet no-op: the engine logs
+    ``Invalid context switch [owner] from <planet>`` on every single firing. A
+    planet is surveyed *before* anyone owns it, so the unguarded ``owner`` switch
+    in that one event produced 32,383 lines in a single game session -- while every
+    event type in the file matched vanilla exactly, which is why the earlier audit
+    called it clean.
+    """
+    section("bridge trigger scopes")
+    import json
+
+    from core import bridge as bridge_core
+
+    hooks = json.loads((DATA / "on_action_hooks.json").read_text(encoding="utf-8"))
+    plan = bridge_core.plan_bridge(hooks)
+    audited = {str(h.get("goal") or ""): h for h in hooks["hooks"]}
+
+    violations: list[tuple[str, str]] = []
+    for hook in plan.hooks:
+        links = re.findall(r"(?m)^(\w+)\s*=\s*\{", hook.trigger)
+        guarded = set(re.findall(r"(?m)^exists\s*=\s*(\w+)", hook.trigger))
+        scope_text = str(audited.get(hook.goal, {}).get("scope") or "").lower()
+        for link in links:
+            if link in guarded or re.search(rf"\b{link}\b", scope_text):
+                continue
+            violations.append((hook.goal, link))
+    check("every scope link is documented by the hook's audit, or guarded",
+          not violations, f"{len(violations)} e.g. {violations[:4]}")
+
+    # The guard has to be a statement the engine evaluates *before* the switch.
+    owner_switches = [h for h in plan.hooks
+                      if re.search(r"(?m)^owner\s*=\s*\{", h.trigger)]
+    check("the existence guard precedes the switch it protects",
+          bool(owner_switches) and all(
+              h.trigger.index("exists = owner")
+              < re.search(r"(?m)^owner\s*=\s*\{", h.trigger).start()
+              for h in owner_switches),
+          f"{len(owner_switches)} hooks switch on owner")
+    survey = next(h for h in plan.hooks if h.goal == "survey_completed_planet")
+    check("the survey hook filters on the country its on_action documents",
+          "from = { is_ai = no }" in survey.trigger and "owner" not in survey.trigger,
+          survey.trigger.replace("\n", " / "))
+    rendered = bridge_core.render_events_file(plan)
+    check("the rendered file keeps the guard and the switch on separate lines",
+          "\t\texists = owner\n\t\towner = { is_ai = no }" in rendered
+          and "exists = owner owner" not in rendered)
+
+
 def main() -> int:
     print("neko_stellaris offline smoke suite")
     test_voice_plan()
@@ -1191,6 +1241,7 @@ def main() -> int:
     test_standalone_export()
     test_layout_independence()
     test_published_copy()
+    test_bridge_scope_links()
 
     print()
     print("=" * 60)
