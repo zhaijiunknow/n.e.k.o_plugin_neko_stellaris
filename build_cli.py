@@ -16,7 +16,7 @@ installed, or watching the TTS batch in a terminal instead of a progress bar.
     python plugin/plugins/neko_stellaris/build_cli.py bridge --install
     python plugin/plugins/neko_stellaris/build_cli.py status
     python plugin/plugins/neko_stellaris/build_cli.py uninstall
-    python plugin/build_cli.py uninstall                    # standalone mirror repo
+    python build_cli.py uninstall                           # this repository (plugin root)
 
 Nothing here re-implements the pipeline; it only wires arguments to the same
 ``core`` modules the entries call, so the two paths cannot drift.
@@ -35,7 +35,7 @@ import time
 # ``core/`` sits beside this file in both of the shapes these sources travel in:
 #
 #   <host>/plugin/plugins/neko_stellaris/   installed inside N.E.K.O
-#   <repo>/plugin/                          the standalone mirror repo
+#   <repo>/                                 this repository (repo root = plugin root)
 #
 # Importing it *through* the plugin package would execute the entry point first,
 # which imports the host SDK -- so this CLI would only ever run inside a host
@@ -45,14 +45,10 @@ HERE = pathlib.Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from core import (  # noqa: E402
-    bridge as bridge_core,
-    combined as combined_core,
-    installer,
-    nekoconfig,
-    standalone as standalone_core,
-    voicepack,
-)
+from core import bridge as bridge_core  # noqa: E402
+from core import combined as combined_core  # noqa: E402
+from core import installer, nekoconfig, voicepack  # noqa: E402
+from core import standalone as standalone_core  # noqa: E402
 from core.tts import TtsSettings  # noqa: E402
 
 DATA = HERE / "data"
@@ -490,8 +486,8 @@ async def _probe_install(args: argparse.Namespace) -> int:
     if not resolved.voice_id:
         print("没有可用音色", file=sys.stderr)
         return 2
-    from core.tts import TtsSettings, synthesize_with_retry
     from core.audiowav import prepare_for_game, wav_bytes_mono16
+    from core.tts import TtsSettings, synthesize_with_retry
 
     tts = TtsSettings(url=resolved.url, api_key=resolved.api_key,
                       voice_id=resolved.voice_id)

@@ -42,7 +42,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from .audiowav import AudioError, decode_wav_bytes, to_pcm16_bytes, wrap_pcm16_wav as _wrap_pcm16
+from .audiowav import AudioError, decode_wav_bytes, to_pcm16_bytes
+from .audiowav import wrap_pcm16_wav as _wrap_pcm16
 
 logger = logging.getLogger("neko_stellaris.tts")
 

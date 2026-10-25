@@ -66,7 +66,6 @@ def _sample(x: float, y: float, size: int) -> tuple[float, float, float, float]:
 
     # Ears first: they must be filled *before* the head so the head circle can
     # round off their bases. Painting the head first would erase the ear tips.
-    ear_h = 7.6 * unit
     for side in (-1, 1):
         tipx = cx + side * 6.4 * unit
         tipy = 5.0 * unit

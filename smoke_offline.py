@@ -15,7 +15,7 @@ on_action ever fires).
 Run it from either layout these sources ship in:
 
     .venv\\Scripts\\python.exe plugin/plugins/neko_stellaris/smoke_offline.py
-    python plugin/smoke_offline.py                    # standalone mirror repo
+    python smoke_offline.py                           # this standalone repository
 
 The single check that touches ``Settings`` lives in the plugin entry point and so
 wants the host SDK; where that is unavailable it is reported as *skipped*, never
@@ -24,15 +24,15 @@ silently dropped.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import sys
-import wave
 
 # ``core/`` sits beside this file in both of the shapes these sources travel in:
 #
 #   <host>/plugin/plugins/neko_stellaris/   installed inside N.E.K.O
-#   <repo>/plugin/                          the standalone mirror repo
+#   <repo>/                                 this standalone repository
 #
 # Importing it *through* the plugin package would execute the entry point first,
 # whose opening act is ``from plugin.sdk.plugin import ...`` -- so the suite would
@@ -44,13 +44,28 @@ HERE = pathlib.Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from core import (  # noqa: E402
-    bridge as bridge_core,
-    ddsicon,
-    gamelog,
-    policy as policy_core,
-    voicepack,
-)
+from core import bridge as bridge_core  # noqa: E402
+from core import ddsicon, gamelog, voicepack  # noqa: E402
+
+
+def _host_root() -> pathlib.Path | None:
+    """The N.E.K.O checkout this plugin can borrow the host SDK from, if any.
+
+    The three shapes to cover: installed under ``<host>/plugin/plugins/...``,
+    cloned as its own repository beside the N.E.K.O checkout, and CI where
+    ``NEKO_ROOT`` points at a checkout somewhere else entirely. Returning None
+    is normal -- the few host-dependent checks then report themselves skipped.
+    """
+    candidates = []
+    override = os.environ.get("NEKO_ROOT", "").strip()
+    if override:
+        candidates.append(pathlib.Path(override).expanduser())
+    candidates.extend(HERE.parents)
+    candidates.append(HERE.parent / "N.E.K.O")
+    for candidate in candidates:
+        if (candidate / "plugin" / "sdk").is_dir():
+            return candidate
+    return None
 
 
 def _host_settings():
@@ -61,9 +76,9 @@ def _host_settings():
     drift. That class lives in the entry point, which imports the N.E.K.O SDK, so
     this is the one part of the suite that cannot run on a bare interpreter.
     """
-    repo = HERE.parents[2]
-    if str(repo) not in sys.path:
-        sys.path.append(str(repo))
+    host = _host_root()
+    if host is not None and str(host) not in sys.path:
+        sys.path.append(str(host))
     try:
         from plugin.plugins.neko_stellaris import Settings
     except Exception:
@@ -520,10 +535,14 @@ def test_gamelog_tailer() -> None:
 
 def test_policy() -> None:
     section("commentary policy")
+
     from core.policy import (
-        CommentaryPolicy, PolicyConfig, build_prompt, DIGEST, URGENT,
+        DIGEST,
+        URGENT,
+        CommentaryPolicy,
+        PolicyConfig,
+        build_prompt,
     )
-    import time as _time
 
     config = PolicyConfig()
     config_min_gap = config.min_gap_s
@@ -712,7 +731,6 @@ def test_live_voice() -> None:
     check("an empty reply stays empty", livevoice.sanitize_line("   ") == "")
 
     # Budget: the brake that keeps a busy war from becoming a continuous bill.
-    import time as _time
     engine = livevoice.LiveVoiceEngine.__new__(livevoice.LiveVoiceEngine)
     engine.config = livevoice.LiveVoiceConfig(budget_per_minute=2, min_seconds_between=8.0)
     engine._last_emit = 0.0
@@ -781,13 +799,13 @@ def livevoice_inventory_load(root):
 def test_freshness(tmp_path=None) -> None:
     """The pack in the game must be checkable against the settings in use now."""
     section("voice-pack freshness")
+    import array as _array
     import copy
     import json as _json
     import tempfile
 
     from core.audiowav import wav_bytes_mono16
     from core.tts import TtsSettings, cache_path
-    import array as _array
 
     dataset = voicepack.load_dataset(DATA / "advisor_sounds.json")
     lines = voicepack.load_lines(DATA / "lines.zh-CN.json")
@@ -1528,8 +1546,12 @@ def test_manifest_schema() -> None:
     try:
         import sys as _sys
 
-        if str(REPO_ROOT := HERE.parents[2]) not in _sys.path:
-            _sys.path.append(str(REPO_ROOT))
+        host = _host_root()
+        if host is None:
+            skip("manifest schema", "找不到 N.E.K.O 检出（可用 NEKO_ROOT 指定）")
+            return
+        if str(host) not in _sys.path:
+            _sys.path.append(str(host))
         from plugin.config.schema import PluginSectionSchema
     except Exception:
         skip("manifest schema", "宿主 SDK 不可导入（本仓库布局）")

@@ -47,14 +47,13 @@ from __future__ import annotations
 
 import json
 import logging
-import random
 import re
 import time
 import zipfile
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable
 
 from . import voicepack
 from .audiowav import prepare_for_game, wav_bytes_mono16

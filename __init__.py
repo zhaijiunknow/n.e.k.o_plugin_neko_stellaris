@@ -56,7 +56,8 @@ from .core import bridge as bridge_core
 from .core import combined as combined_core
 from .core import gamelog, installer, livevoice, nekoconfig, voicepack
 from .core.policy import CommentaryPolicy, Decision, PolicyConfig, build_prompt
-from .core.tts import TtsSettings, count_cache_misses, probe as tts_probe
+from .core.tts import TtsSettings, count_cache_misses
+from .core.tts import probe as tts_probe
 
 ADVISOR_MOD_ID = voicepack.DEFAULT_MOD_ID
 BRIDGE_MOD_ID = bridge_core.DEFAULT_MOD_ID

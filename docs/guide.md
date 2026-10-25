@@ -88,6 +88,8 @@ Paradox 启动器的行为是两段的：它扫描 `mod/` 目录，给每个 `.m
 python plugin/plugins/neko_stellaris/build_cli.py playset
 ```
 
+（下面所有 `plugin/plugins/neko_stellaris/...` 都是**宿主布局**的写法。直接在本仓库里跑就把前缀去掉，例如 `python build_cli.py playset`——这些脚本都在自己所在目录找 `core/`。）
+
 对话里也可以用 `stellaris_enable_in_launcher`。**实在不行就在启动器 mod 列表里手动勾这两个 checkbox**，那永远有效。
 
 ### 发布之后：本地那份会被启动器删掉
@@ -106,7 +108,7 @@ python plugin/plugins/neko_stellaris/build_cli.py playset
 只有命令行是逃生口——那是明确的操作：
 
 ```
-python plugin/build_cli.py combined --install      # 就是要本地一份（比如做测试）
+python build_cli.py combined --install      # 就是要本地一份（比如做测试）
 ```
 
 卸载同样不会碰工坊副本（那是 Steam 管的），只会在结果里提醒你去 Steam 取消订阅。
@@ -386,7 +388,7 @@ python plugin/plugins/neko_stellaris/build_cli.py status
 python plugin/plugins/neko_stellaris/build_cli.py uninstall
 ```
 
-上面的路径是**宿主布局**的写法。这些脚本按**自身所在目录**去找 `core/`，所以从独立仓库直接跑时把前缀换成 `plugin/`（例如 `python plugin/build_cli.py plan`）就行——脚本不去碰插件入口，因此不需要宿主 SDK 在场。
+上面的路径是**宿主布局**的写法。这些脚本按**自身所在目录**去找 `core/`，所以直接在本仓库里跑时去掉前缀就行（例如 `python build_cli.py plan`）——脚本不去碰插件入口，因此不需要宿主 SDK 在场。本仓库的根目录就是插件目录（`plugin.toml` 在根上），所以「去掉前缀」正是正确写法。
 
 （`voice` 和 `bridge` 子命令还在，只生成单独一半，留给排查问题用。日常用 `combined`。）
 
@@ -401,10 +403,10 @@ python plugin/plugins/neko_stellaris/build_cli.py combined --name "由依" --ins
 ## 八、测试
 
 ```
-.venv\Scripts\python.exe plugin\plugins\neko_stellaris\smoke_offline.py
+.venv\Scripts\python.exe smoke_offline.py
 ```
 
-在宿主里是 226 项检查；从独立仓库直接跑是 223 项通过 + 3 项跳过——那三项分别是：两项要经插件入口读 `Settings`、一项要把 `plugin.toml` 交给宿主的 pydantic schema 校验——都需要宿主 SDK，需要宿主 SDK，缺了它会**显式报告跳过**而不是静默少算。命令在两种布局下都能跑：宿主里用上面那条路径，从独立仓库跑则是 `python plugin/smoke_offline.py`。
+在宿主里、以及在本仓库里（旁边有 N.E.K.O 检出时）都是 **226 项检查**；找不到宿主 SDK 时是 223 项通过 + 3 项跳过——那三项分别是：两项要经插件入口读 `Settings`、一项要把 `plugin.toml` 交给宿主的 pydantic schema 校验——都需要宿主 SDK，缺了它会**显式报告跳过**而不是静默少算。找宿主的顺序是 `NEKO_ROOT` 环境变量 → 自身的各级上级目录 → 旁边的 `../N.E.K.O`，所以两种布局用同一条命令。
 
 **不联网、不碰 TTS、不碰游戏**，断言的是插件产出的**格式**——因为这里才是昂贵的错误所在：一个没有覆盖全部可达声音的 soundgroup、一个少了 BOM 的本地化文件、一个头部与原版不符的 DDS、一个没有任何 on_action 会触发的桥接事件。
 
@@ -445,6 +447,8 @@ plugin/plugins/neko_stellaris/
 ├── i18n/
 └── ui/panel.tsx             面板（Hosted UI，只读状态 + 调现有入口）
 ```
+
+这是**部署进宿主之后**的样子。仓库里同一批文件就摆在仓库根上（`plugin.toml` 在根），另外仓库还带 `tests/`、`tools/`、`pyproject.toml`、`config.example.toml`，以及不参与部署的 `docs/`、`workshop/`、`.vscode/`、`.github/`。
 
 `data/on_action_hooks.json` 与 `advisor_sounds.json` 都是从安装目录里**实测提取**的，游戏更新后可以重新提取而不是靠猜。
 

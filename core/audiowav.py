@@ -165,8 +165,9 @@ def decode_wav_bytes(data: bytes) -> Audio:
 
 
 def _resample_numpy(samples: array.array, src: int, dst: int) -> array.array:
-    import numpy as np
     from math import gcd
+
+    import numpy as np
     from scipy.signal import resample_poly
 
     up, down = dst // gcd(src, dst), src // gcd(src, dst)

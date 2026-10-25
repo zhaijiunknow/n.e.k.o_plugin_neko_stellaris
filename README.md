@@ -37,8 +37,10 @@ nekko_stellaris_advisor/
 
 ## 目录
 
+**仓库根就是插件目录**（`plugin.toml` 在根上），这是 N.E.K.O 官方 CLI 的约定：它要求被检查的目录里直接躺着 `plugin.toml`，这样 `neko-plugin check <本仓库>` 才能开箱即用。
+
 ```
-plugin/                 N.E.K.O 插件本体
+.                       N.E.K.O 插件本体
 ├── plugin.toml         清单 + [stellaris] 配置
 ├── __init__.py         入口（12 个 entry + 3 个 lifecycle）
 ├── core/
@@ -59,7 +61,17 @@ plugin/                 N.E.K.O 插件本体
 ├── assets/             顾问图标原图：生成游戏内 DDS 与工坊缩略图的来源
 ├── build_cli.py        不依赖宿主的命令行入口
 ├── ui/panel.tsx        面板（Hosted UI，只读状态 + 调现有入口）
-└── smoke_offline.py    223 项离线回归检查（在宿主里跑是 226 项）
+├── smoke_offline.py    226 项离线回归检查
+├── tests/              pytest 入口：把上面那套检查接进 `neko-plugin check -r`
+├── config.example.toml 可变配置项的示例（**没有代码会加载它**）
+├── pyproject.toml      仅元数据；运行时零第三方依赖（SDK 与 websockets 由宿主提供）
+├── tools/
+│   ├── neko-check.cmd  用 N.E.K.O 官方 CLI 检查本仓库
+│   └── deploy-to-neko.cmd  把本仓库镜像进宿主
+├── .vscode/tasks.json  同样的官方检查任务（check / check -r / sync / build）
+├── .github/workflows/  CI：直接复用 N.E.K.O 自己的插件校验工作流
+├── docs/guide.md       详细说明书（安装、使用、排障）
+└── workshop/           创意工坊发布用的描述与清单
 ```
 
 ### `data/` 里的东西是提取出来的，不是猜的
@@ -84,24 +96,32 @@ plugin/                 N.E.K.O 插件本体
 <N.E.K.O>/plugin/plugins/neko_stellaris/
 ```
 
-也就是把本仓库 `plugin/` 里的**内容**拷进去（目录名必须是 `neko_stellaris`，因为 `plugin.toml` 里的入口是 `plugin.plugins.neko_stellaris:...`）。
+也就是把本仓库的**内容**拷进去（目录名必须是 `neko_stellaris`，因为 `plugin.toml` 里的入口是 `plugin.plugins.neko_stellaris:...`）。
 
 > N.E.K.O 也支持把外部目录注册成开发源（development registration），但那条路径要求入口写成 `plugins.<id>` 命名空间，和内置位置的写法不同，且需要在运行中的宿主里注册。这里不依赖它。
 
 ### 这个仓库是唯一的维护点
 
-**所有改动都发生在 `plugin/`**，别的任何副本都是从这里导出/部署出去的。
+**所有改动都发生在仓库根**，别的任何副本都是从这里部署出去的。
 
-自检在仓库里就能跑，不需要宿主在场（三项依赖宿主 SDK 的检查会显式跳过）：
-
-```
-python plugin/smoke_offline.py        # 223 项通过 + 3 项跳过
-```
-
-想在 N.E.K.O 里跑、或看插件面板时，把仓库这一份部署过去（单向覆盖）：
+自检在仓库里就能跑，不需要宿主在场：
 
 ```
-robocopy plugin "<N.E.K.O 安装目录>\plugin\plugins\neko_stellaris" /MIR /XD __pycache__ /XF *.pyc
+python smoke_offline.py        # 226 项通过
+```
+
+`smoke_offline.py` 会顺着自己的位置找 `core/`，所以「装着宿主的目录」和「本仓库」两种布局下都能直接跑。有三项检查需要宿主 SDK：两项要经插件入口读 `Settings`，一项要把 `plugin.toml` 交给宿主的 pydantic schema 校验。它会自动去找 N.E.K.O 检出（`NEKO_ROOT` 环境变量、上级目录、或旁边的 `../N.E.K.O`）：找到了就跑满 226 项，找不到就**显式报跳过**（223 项通过 + 3 项跳过），而不是静默少算。
+
+想在 N.E.K.O 里跑、或看插件面板时，把仓库这一份镜像进宿主（单向覆盖）：
+
+```
+tools\deploy-to-neko.cmd
+```
+
+等价的裸命令：
+
+```
+robocopy . "<N.E.K.O 安装目录>\plugin\plugins\neko_stellaris" /MIR /XD .git .github .vscode docs workshop __pycache__ .pytest_cache /XF *.pyc
 ```
 
 然后重启宿主（或在插件管理器里重新加载）。注意 `plugin.toml` 的入口是
@@ -111,25 +131,49 @@ robocopy plugin "<N.E.K.O 安装目录>\plugin\plugins\neko_stellaris" /MIR /XD 
 > 部署 ≠ 生成游戏内 mod。前者把**插件代码**放进宿主；后者（下面的 `build_cli.py`）产出并安装
 > 《群星》的 **mod 数据**。两条路写的是完全不同的目录。
 
+### 用 N.E.K.O 自己的 CLI 检查它
+
+仓库形状就是按官方约定来的（仓库根即插件目录），所以官方 CLI 可以直接把本仓库当插件检查，不用拷来拷去：
+
+```
+tools\neko-check.cmd            # 就绪检查：0 error 才算过
+tools\neko-check.cmd --strict   # 把「缺仓库支持文件」也算 error
+tools\neko-check.cmd -r         # 发布前：strict + 跑 tests/ + 打包 + 校验 payload hash
+```
+
+`tools\neko-check.cmd` 只负责找到 N.E.K.O 的 venv 和 CLI；等价的手动调用是先进到 N.E.K.O 检出目录、再用它的解释器：
+
+```
+cd <N.E.K.O>
+.venv\Scripts\python.exe -m plugin.neko_plugin_cli check <本仓库>
+```
+
+（N.E.K.O 不在仓库旁边就设 `NEKO_ROOT`。VSCode 里也有同样的任务，见 `.vscode/tasks.json`。）
+
+当前结果是 **0 error**。警告只剩一条，而且是 CLI 自己的字段白名单过旧：`[plugin].models is not a recognized plugin.toml field` —— 宿主的 `PluginSectionSchema` 接受 `[plugin.models.<usage>]`（设计文档 `docs/design/plugin-model-slots.md` 也是这么写的），所以这条保留不动，不为了讨好检查器去删掉真正在用的配置。
+
+`-r` 那一档也正是 CI 跑的东西：`.github/workflows/verify.yml` 直接复用 N.E.K.O 自己的 `plugin-market-verify.yml`（ruff → 把本仓库挂载成 `plugin/plugins/neko_stellaris` → `neko-plugin check -r`），不是另写一套检查。
+
+
 游戏 mod 由插件生成并安装，不需要手工放置。想手工用也可以：
 
 ```
-python plugin/build_cli.py standalone         # 导出纯语音包 + zip，可自己装/发给别人
-python plugin/build_cli.py combined --install # 生成整合版并装进游戏
-python plugin/build_cli.py check              # 游戏里那份是否已过期
+python build_cli.py standalone         # 导出纯语音包 + zip，可自己装/发给别人
+python build_cli.py combined --install # 生成整合版并装进游戏
+python build_cli.py check              # 游戏里那份是否已过期
 ```
 
 ---
 
-## 底线：223 项离线检查
+## 底线：226 项离线检查
 
 ```
-python plugin/smoke_offline.py
+python smoke_offline.py
 ```
 
 **不联网、不碰 TTS、不碰游戏**，断言的是产出的**格式**——因为这里才是昂贵的错误所在。
 
-`build_cli.py` 和 `smoke_offline.py` 都按**自己所在目录**去找 `core/`，所以在「已装进宿主」和「本仓库」两种布局下都能直接跑，不需要 N.E.K.O 在场。有三项检查需要宿主 SDK：两项要经插件入口读 `Settings`，一项要把 `plugin.toml` 交给宿主的 pydantic schema 校验。在本仓库里跑时它们会**显式报告跳过**，结果是 223 项通过 + 3 项跳过，而不是静默少算。这条不变量本身也在检查里（`layout independence` 一节），所以它不会再悄悄退化。
+`build_cli.py` 和 `smoke_offline.py` 都按**自己所在目录**去找 `core/`，所以在「已装进宿主」和「本仓库」两种布局下都能直接跑，不需要 N.E.K.O 在场。有三项检查需要宿主 SDK：两项要经插件入口读 `Settings`，一项要把 `plugin.toml` 交给宿主的 pydantic schema 校验。`_host_root()` 会去找 N.E.K.O 检出（`NEKO_ROOT`、上级目录、或旁边的 `../N.E.K.O`）：找到就跑满 226 项，找不到就**显式报告跳过**（223 项通过 + 3 项跳过），而不是静默少算。这条不变量本身也在检查里（`layout independence` 一节），所以它不会再悄悄退化。
 
 这套检查在开发过程中抓到过这些真 bug：
 

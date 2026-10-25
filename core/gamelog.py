@@ -37,7 +37,6 @@ Two details that look like trivia and are not:
 from __future__ import annotations
 
 import codecs
-import json
 import logging
 import re
 import time

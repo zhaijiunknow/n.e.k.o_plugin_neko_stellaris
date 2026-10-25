@@ -11,16 +11,22 @@ build/
 dist/
 *-standalone/
 *.zip
+*.egg-info/
+
+# Runtime state the N.E.K.O host may drop next to the plugin source.
+store.db
+.env
 
 # Generated voice packs are ~36 MiB of audio and are reproducible from
 # data/lines.zh-CN.json plus a TTS call. Publish them as release assets, not as
 # commits.
 *.wav
-!plugin/data/**/*.wav
+!data/**/*.wav
 
 # Local tooling
 .venv/
 venv/
+vendor/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/

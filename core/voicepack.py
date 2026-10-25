@@ -62,7 +62,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
 from . import ddsicon
-from .audiowav import TARGET_RATE, prepare_for_game, wav_bytes_mono16
+from .audiowav import prepare_for_game, wav_bytes_mono16
 from .tts import TtsSettings, TtsStats, synthesize_many
 
 logger = logging.getLogger("neko_stellaris.voicepack")
@@ -853,7 +853,8 @@ def check_freshness(
     # costs seconds as if it were the minutes-long TTS batch, and talk the user out
     # of work that is essentially free.
     if state in ("voice_changed", "lines_changed", "dataset_changed"):
-        from .tts import TtsSettings as _Tts, count_cache_misses
+        from .tts import TtsSettings as _Tts
+        from .tts import count_cache_misses
         if isinstance(tts, _Tts) and cache_dir:
             clips = count_cache_misses(
                 [(j.sound, j.text) for j in clip_jobs(plan)], tts, cache_dir)
