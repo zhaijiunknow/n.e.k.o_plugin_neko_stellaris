@@ -282,6 +282,30 @@ stellaris_live_voice off      # 关掉，退回纯静态语音包
 | `variants` | `4` | 每个事件变体上限（按组另有分档，这是全局上限） |
 | `auto_install` | `true` | 生成完自动装 |
 
+### 面板（Hosted UI）
+
+`ui/panel.tsx` 是插件面板，由 N.E.K.O 的插件管理器渲染。它**只读**：所有数字都来自
+`@ui.context(id="dashboard")` 返回的那一份状态（与 `stellaris_status` 同一批辅助函数算出来，
+所以两者不会说法不一致），按钮就是调现有入口。
+
+| 卡片 | 内容 |
+|---|---|
+| 统计 | 游戏内安装来源（创意工坊 / 本地）、版本、台词条数、是否与当前音色一致 |
+| 自检 | `stellaris_voice_check` 的结论 + 「重建并安装」按钮 |
+| 安装详情 | 路径、文件数、体积、`dlc_load` 是否登记、工坊条目号 |
+| 音色与通道 | 音色、来源、端点、密钥是否配置 + 「试听一句」 |
+| error.log 健康度 | 四个计数（桥接事件报错 / Invalid context switch / No sound scripted / unsupported scope），全为 0 即干净 |
+| 危险操作 | 「卸载游戏内的 mod」（带确认对话框） |
+
+构建是后台任务：面板检测到 `running_job` 时每 2 秒刷新一次，进度用 `Progress` 显示。
+
+**双副本警告**：工坊副本与本地副本同时存在、或同时在 `dlc_load` 里启用时，面板顶部常驻一条
+`Warning` —— 两个都启用会让桥接钩子被追加两次，每个事件触发两遍。
+
+面板的接线由离线检查固定：清单里的 `entry` 必须指向存在的文件、面板驱动的每个入口必须在
+Python 里存在且挂了 `@ui.action`、面板用到的每个 i18n 键必须在两种语言里都有。
+**渲染效果本身没法离线验证**，需要打开插件管理器看一眼。
+
 ---
 
 ## 五、一个必须说清楚的假设
@@ -380,7 +404,7 @@ python plugin/plugins/neko_stellaris/build_cli.py combined --name "由依" --ins
 .venv\Scripts\python.exe plugin\plugins\neko_stellaris\smoke_offline.py
 ```
 
-在宿主里是 213 项检查；从独立仓库直接跑是 211 项通过 + 2 项跳过——那两项要经插件入口读 `Settings`，需要宿主 SDK，缺了它会**显式报告跳过**而不是静默少算。命令在两种布局下都能跑：宿主里用上面那条路径，从独立仓库跑则是 `python plugin/smoke_offline.py`。
+在宿主里是 225 项检查；从独立仓库直接跑是 223 项通过 + 2 项跳过——那两项要经插件入口读 `Settings`，需要宿主 SDK，缺了它会**显式报告跳过**而不是静默少算。命令在两种布局下都能跑：宿主里用上面那条路径，从独立仓库跑则是 `python plugin/smoke_offline.py`。
 
 **不联网、不碰 TTS、不碰游戏**，断言的是插件产出的**格式**——因为这里才是昂贵的错误所在：一个没有覆盖全部可达声音的 soundgroup、一个少了 BOM 的本地化文件、一个头部与原版不符的 DDS、一个没有任何 on_action 会触发的桥接事件。
 
@@ -417,8 +441,9 @@ plugin/plugins/neko_stellaris/
 │   └── persona_brief.md     人设结论（自称「本喵」、称玩家「碳基生物」的来源）
 ├── assets/                  顾问图标原图（游戏内 DDS 与工坊缩略图的上游）
 ├── build_cli.py             不依赖宿主的命令行入口
-├── smoke_offline.py         211 项离线回归检查（宿主内 213）
-└── i18n/
+├── smoke_offline.py         223 项离线回归检查（宿主内 225）
+├── i18n/
+└── ui/panel.tsx             面板（Hosted UI，只读状态 + 调现有入口）
 ```
 
 `data/on_action_hooks.json` 与 `advisor_sounds.json` 都是从安装目录里**实测提取**的，游戏更新后可以重新提取而不是靠猜。

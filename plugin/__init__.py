@@ -49,13 +49,14 @@ from plugin.sdk.plugin import (
     lifecycle,
     neko_plugin,
     plugin_entry,
+    ui,
 )
 
 from .core import bridge as bridge_core
 from .core import combined as combined_core
 from .core import gamelog, installer, livevoice, nekoconfig, voicepack
 from .core.policy import CommentaryPolicy, Decision, PolicyConfig, build_prompt
-from .core.tts import TtsSettings, probe as tts_probe
+from .core.tts import TtsSettings, count_cache_misses, probe as tts_probe
 
 ADVISOR_MOD_ID = voicepack.DEFAULT_MOD_ID
 BRIDGE_MOD_ID = bridge_core.DEFAULT_MOD_ID
@@ -145,6 +146,55 @@ class Job:
             "error": self.error,
             "elapsed_s": round((self.ended_at or time.time()) - self.started_at, 1),
         }
+
+
+# Error lines this plugin has learned to care about. Counted for the panel's
+# "is the current build healthy in the real game" card -- the same four greps the
+# release checklist asks for, so the checklist and the UI cannot drift.
+_ERROR_PATTERNS = {
+    "bridge_events": "neko_bridge_events",
+    "context_switch": "Invalid context switch",
+    "missing_sound": "No sound scripted",
+    "unsupported_scope": "unsupported scope",
+}
+_LOG_TAIL_BYTES = 4 * 1024 * 1024
+_LOG_HEALTH_CACHE: dict[str, Any] = {}
+
+
+def _log_health(user: Path | None) -> dict[str, Any]:
+    """Count those lines in the tail of ``logs/error.log``.
+
+    Reads only the tail: the file grows to tens of megabytes and the interesting
+    part is always the session just played. Cached on (mtime, size) so a panel that
+    refreshes every couple of seconds does not rescan it.
+    """
+    if user is None:
+        return {"available": False, "path": ""}
+    path = Path(user) / "logs" / "error.log"
+    try:
+        stat = path.stat()
+    except OSError:
+        return {"available": False, "path": str(path)}
+    key = f"{path}|{stat.st_mtime_ns}|{stat.st_size}"
+    if _LOG_HEALTH_CACHE.get("key") == key:
+        return _LOG_HEALTH_CACHE["value"]
+    try:
+        with path.open("rb") as handle:
+            handle.seek(max(0, stat.st_size - _LOG_TAIL_BYTES))
+            text = handle.read().decode("utf-8", errors="replace")
+    except OSError:
+        return {"available": False, "path": str(path)}
+    counts = {name: text.count(needle) for name, needle in _ERROR_PATTERNS.items()}
+    value = {
+        "available": True,
+        "path": str(path),
+        "size_kib": round(stat.st_size / 1024),
+        "counts": counts,
+        "clean": not any(counts.values()),
+    }
+    _LOG_HEALTH_CACHE.clear()
+    _LOG_HEALTH_CACHE.update({"key": key, "value": value})
+    return value
 
 
 @neko_plugin
@@ -458,6 +508,7 @@ class NekoStellarisPlugin(NekoPluginBase):
             job, plan, self._tts_settings(), self.data_path("pack"),
             nekoconfig.tts_cache_dir(), True))
 
+    @ui.action(label="检查游戏里那份是否最新", icon="🔍", group="build", order=20)
     @plugin_entry(
         id="stellaris_voice_check",
         name="检查并刷新顾问语音包",
@@ -532,6 +583,126 @@ class NekoStellarisPlugin(NekoPluginBase):
             "settings_source": dict(self._settings.sources),
         })
 
+    # ------------------------------------------------------------------ #
+    # Hosted UI (面板)
+    # ------------------------------------------------------------------ #
+
+    @ui.context(id="dashboard", title="星辰喵语")
+    async def get_dashboard_ui_context(self) -> dict[str, Any]:
+        """State for the Hosted UI panel declared in ``ui/panel.tsx``.
+
+        Composed from the same helpers the entries use, so the panel and
+        ``stellaris_status`` cannot disagree about what is installed.
+        """
+        try:
+            return await self._dashboard_state()
+        except Exception as exc:  # noqa: BLE001 - a broken panel must not break the plugin
+            self.logger.warning("面板状态构建失败: %s", exc)
+            return {"error": str(exc)}
+
+    async def _dashboard_state(self) -> dict[str, Any]:
+        try:
+            user = nekoconfig.find_stellaris_user_dir()
+        except Exception:  # noqa: BLE001
+            user = None
+        plan, spec, _dataset, _lines = self._load_plan_inputs(self._settings.variants)
+        resolved = self._resolved_voice()
+        tts = self._tts_settings()
+
+        active = installer.find_active_install(user, mod_id=ADVISOR_MOD_ID) if user else None
+        published = installer.find_published_copy(user, mod_id=ADVISOR_MOD_ID) if user else None
+        local_dir = (Path(user) / "mod" / ADVISOR_MOD_ID) if user else None
+        local_exists = bool(local_dir and local_dir.is_dir())
+
+        enabled: list[str] = []
+        dlc_load = (Path(user) / "dlc_load.json") if user else None
+        if dlc_load is not None and dlc_load.is_file():
+            try:
+                enabled = list(json.loads(dlc_load.read_text(encoding="utf-8"))
+                               .get("enabled_mods") or [])
+            except Exception:  # noqa: BLE001
+                enabled = []
+        entries = {f"mod/{ADVISOR_MOD_ID}.mod"}
+        if published is not None:
+            entries.add(f"mod/{published.stub.name}")
+        enabled_ours = sorted(e for e in enabled if e in entries)
+
+        # Two copies of the same mod is the one state that quietly breaks the game:
+        # the bridge's on_action hooks are appended once per copy, so every bridged
+        # event fires twice.
+        duplicate = {
+            "both_present": bool(local_exists and published is not None),
+            "enabled": enabled_ours,
+            "both_enabled": len(enabled_ours) > 1,
+        }
+
+        jobs = [job.payload() for job in self._jobs.values()]
+        running = next((j for j in reversed(jobs) if j.get("state") == "running"), None)
+
+        try:
+            fresh = self._voice_freshness()
+            freshness = {
+                "state": fresh.state,
+                "summary": fresh.summary(),
+                "needs_rebuild": fresh.needs_rebuild,
+                "clips_to_generate": fresh.clips_to_generate,
+            }
+        except Exception as exc:  # noqa: BLE001
+            freshness = {"state": "unknown", "summary": str(exc), "needs_rebuild": False,
+                         "clips_to_generate": 0}
+
+        clips = [job.sound for job in voicepack.clip_jobs(plan)]
+        cache_dir = nekoconfig.tts_cache_dir()
+        try:
+            missing = count_cache_misses([(j.sound, j.text) for j in voicepack.clip_jobs(plan)],
+                                         tts, cache_dir)
+        except Exception:  # noqa: BLE001 - a panel must still render
+            missing = 0
+
+        install_state: dict[str, Any] = {}
+        if active is not None:
+            info = installer.inspect_installation(user, mod_id=ADVISOR_MOD_ID) if user else None
+            install_state = {
+                "kind": active.kind,
+                "path": str(active.path),
+                "remote_id": active.remote_id,
+                "version": info.version if info else "",
+                "files": info.file_count if info else 0,
+                "size_mib": round((info.bytes_total if info else 0) / 1048576, 1),
+                "clips": info.clip_count if info else 0,
+                "registered": bool(info.registered) if info else False,
+                "summary": info.summary() if info else "",
+            }
+
+        return {
+            "mod_id": ADVISOR_MOD_ID,
+            "version": spec.mod_version,
+            "user_dir": str(user) if user else "",
+            "install": install_state,
+            "freshness": freshness,
+            "published": ({"remote_id": published.remote_id, "path": str(published.path)}
+                          if published is not None else {}),
+            "duplicate": duplicate,
+            "clips": {
+                "total": len(clips),
+                "cached": max(0, len(clips) - missing),
+                "missing": missing,
+                "title": f"{plan.slot_count} 个声音 / {plan.clip_count} 条录音",
+            },
+            "tts": {
+                "url": resolved.url,
+                "voice_id": resolved.voice_id,
+                "source": resolved.voice_source,
+                "key_set": bool(resolved.api_key),
+            },
+            "live": dict(self._live_stats),
+            "jobs": jobs[-5:],
+            "running_job": running,
+            "log_health": _log_health(user),
+            "errors": list(plan.warnings),
+        }
+
+    @ui.action(label="试听一句", icon="🔊", group="test", order=30, refresh_context=False)
     @plugin_entry(
         id="stellaris_tts_probe",
         name="测试语音通道",
@@ -610,6 +781,7 @@ class NekoStellarisPlugin(NekoPluginBase):
             "output": str(self.data_path("pack")),
         })
 
+    @ui.action(label="重建语音包", icon="🔨", group="build", order=10)
     @plugin_entry(
         id="stellaris_build_voice",
         name="生成顾问语音包",
@@ -882,6 +1054,8 @@ class NekoStellarisPlugin(NekoPluginBase):
             **engine.status(),
         })
 
+    @ui.action(label="卸载游戏内的 mod", icon="🗑️", tone="danger", group="danger",
+               order=90, confirm=True)
     @plugin_entry(
         id="stellaris_uninstall",
         name="卸载群星 mod",

@@ -1447,6 +1447,71 @@ def test_tts_session() -> None:
           recovered and connections == 2, f"{connections} 个连接")
 
 
+def test_hosted_ui() -> None:
+    """The panel is the one artifact this suite cannot render, so pin its wiring.
+
+    Everything asserted here is a way the UI can be silently broken while every
+    Python check still passes: a manifest entry pointing at a missing file, a
+    button whose entry no longer exists, an action that was never marked
+    ``@ui.action`` (so the host never offers it), or a label key that only one
+    locale has.
+    """
+    section("hosted ui")
+    import json
+
+    try:
+        import tomllib
+    except ImportError:  # pragma: no cover - py3.11+
+        skip("hosted ui manifest", "tomllib 不可用")
+        return
+
+    panel = HERE / "ui" / "panel.tsx"
+    check("the panel file exists", panel.is_file(), str(panel))
+    if not panel.is_file():
+        return
+    source = panel.read_text(encoding="utf-8")
+    check("the panel default-exports a component",
+          "export default function" in source)
+    check("the panel imports from the host ui kit",
+          'from "@neko/plugin-ui"' in source)
+
+    manifest = tomllib.loads((HERE / "plugin.toml").read_text(encoding="utf-8"))
+    ui_block = (manifest.get("plugin") or {}).get("ui") or {}
+    panels = ui_block.get("panel") or []
+    check("the manifest enables the panel", bool(ui_block.get("enabled")) and bool(panels))
+    check("every declared panel entry points at a file that exists",
+          bool(panels) and all((HERE / str(p.get("entry") or "")).is_file() for p in panels),
+          str([p.get("entry") for p in panels]))
+    permissions = set()
+    for item in panels:
+        permissions |= set(item.get("permissions") or [])
+    check("the panel asks for the permissions it uses",
+          {"state:read", "action:call"} <= permissions, sorted(permissions))
+    check("the panel reads the context the plugin provides",
+          any(str(p.get("context") or "") == "dashboard" for p in panels)
+          and '@ui.context(id="dashboard"' in (HERE / "__init__.py").read_text(encoding="utf-8"))
+
+    plugin_source = (HERE / "__init__.py").read_text(encoding="utf-8")
+    entry_ids = set(re.findall(r'id="(stellaris_[a-z_]+)"', plugin_source))
+    driven = set(re.findall(r'"(stellaris_[a-z_]+)"', source))
+    check("every entry the panel drives still exists", driven <= entry_ids,
+          sorted(driven - entry_ids))
+    unmarked = []
+    for entry in sorted(driven):
+        index = plugin_source.find(f'id="{entry}"')
+        window = plugin_source[max(0, index - 400):index] if index >= 0 else ""
+        if "@ui.action(" not in window:
+            unmarked.append(entry)
+    check("every entry the panel drives is marked @ui.action", not unmarked, unmarked)
+
+    keys = set(re.findall(r't\("([^"]+)"', source))
+    check("the panel uses translated labels, not hardcoded text", bool(keys))
+    for name in ("zh-CN.json", "en.json"):
+        locale = json.loads((HERE / "i18n" / name).read_text(encoding="utf-8"))
+        missing = sorted(k for k in keys if k not in locale)
+        check(f"{name} covers every label the panel uses", not missing, missing[:4])
+
+
 def main() -> int:
     print("neko_stellaris offline smoke suite")
     test_voice_plan()
@@ -1466,6 +1531,7 @@ def main() -> int:
     test_published_copy()
     test_bridge_scope_links()
     test_install_paths()
+    test_hosted_ui()
     test_tts_session()
 
     print()

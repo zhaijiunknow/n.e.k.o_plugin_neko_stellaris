@@ -94,3 +94,22 @@ check_on_startup = true
 # 发现不一致就后台重建。只补缓存没命中的部分：
 # 改一行台词是秒级，换音色是 248 条、几分钟。
 auto_refresh_voice = true
+
+# --------------------------------------------------------------------------- #
+# 面板（Hosted UI）
+# 声明 ui/panel.tsx；状态由 @ui.context(id="dashboard") 提供，按钮是挂了
+# @ui.action 的四个入口。面板只读状态 + 调现有入口，不新增任何旁路逻辑。
+# --------------------------------------------------------------------------- #
+[plugin.ui]
+enabled = true
+
+[[plugin.ui.panel]]
+id = "main"
+title = "星辰喵语"
+entry = "ui/panel.tsx"
+context = "dashboard"
+permissions = [
+    "state:read",
+    "config:read",
+    "action:call",
+]
