@@ -1,8 +1,8 @@
 # 星辰喵语 — 把 N.E.K.O 接进《群星》
 
-[![verify](https://github.com/zhaijiunknow/n.e.k.o_plugin_stellaris/actions/workflows/verify.yml/badge.svg)](https://github.com/zhaijiunknow/n.e.k.o_plugin_stellaris/actions/workflows/verify.yml)
-[![neko-plugin check](https://img.shields.io/badge/neko--plugin%20check-0%20error-brightgreen)](https://github.com/zhaijiunknow/n.e.k.o_plugin_stellaris#用-neko-自己的-cli-检查它)
-[![release](https://img.shields.io/github/v/release/zhaijiunknow/n.e.k.o_plugin_stellaris)](https://github.com/zhaijiunknow/n.e.k.o_plugin_stellaris/releases/latest)
+[![verify](https://github.com/zhaijiunknow/n.e.k.o_plugin_neko_stellaris/actions/workflows/verify.yml/badge.svg)](https://github.com/zhaijiunknow/n.e.k.o_plugin_neko_stellaris/actions/workflows/verify.yml)
+[![neko-plugin check](https://img.shields.io/badge/neko--plugin%20check-0%20error-brightgreen)](https://github.com/zhaijiunknow/n.e.k.o_plugin_neko_stellaris#用-neko-自己的-cli-检查它)
+[![release](https://img.shields.io/github/v/release/zhaijiunknow/n.e.k.o_plugin_neko_stellaris)](https://github.com/zhaijiunknow/n.e.k.o_plugin_neko_stellaris/releases/latest)
 
 一个 N.E.K.O 插件，外加它生成的《群星》顾问语音包工具链。
 
@@ -140,9 +140,10 @@ robocopy . "<N.E.K.O 安装目录>\plugin\plugins\neko_stellaris" /MIR /XD .git 
 仓库形状就是按官方约定来的（仓库根即插件目录），所以官方 CLI 可以直接把本仓库当插件检查，不用拷来拷去：
 
 ```
-tools\neko-check.cmd            # 就绪检查：0 error 才算过
-tools\neko-check.cmd --strict   # 把「缺仓库支持文件」也算 error
-tools\neko-check.cmd -r         # 发布前：strict + 跑 tests/ + 打包 + 校验 payload hash
+tools\neko-check.cmd                    # 就绪检查：0 error 才算过
+tools\neko-check.cmd --strict           # 把「缺仓库支持文件」也算 error
+tools\neko-check.cmd -r                 # 发布前：strict + 跑 tests/ + 打包 + 校验 payload hash
+tools\neko-check.cmd -r --market-release # 最严一档：再加上插件市场的仓库命名与 release.yml 约定
 ```
 
 `tools\neko-check.cmd` 只负责找到 N.E.K.O 的 venv 和 CLI；等价的手动调用是先进到 N.E.K.O 检出目录、再用它的解释器：
@@ -154,11 +155,11 @@ cd <N.E.K.O>
 
 （N.E.K.O 不在仓库旁边就设 `NEKO_ROOT`。VSCode 里也有同样的任务，见 `.vscode/tasks.json`。）
 
-当前结果是 **0 error**。警告只剩一条，而且是 CLI 自己的字段白名单过旧：`[plugin].models is not a recognized plugin.toml field` —— 宿主的 `PluginSectionSchema` 接受 `[plugin.models.<usage>]`（设计文档 `docs/design/plugin-model-slots.md` 也是这么写的），所以这条保留不动，不为了讨好检查器去删掉真正在用的配置。
+当前结果：**`check` 0 error、`check -r` passed、`check -r --market-release` passed**。警告只剩一条，而且是 CLI 自己的字段白名单过旧：`[plugin].models is not a recognized plugin.toml field` —— 宿主的 `PluginSectionSchema` 接受 `[plugin.models.<usage>]`（设计文档 `docs/design/plugin-model-slots.md` 也是这么写的），所以这条保留不动，不为了讨好检查器去删掉真正在用的配置。
 
-`-r` 那一档也正是 CI 在做的事：`.github/workflows/verify.yml` 会把本仓库挂进 N.E.K.O 的 `plugin/plugins/neko_stellaris`，跑官方的 `sync --clean` 与 `check -r`（strict 校验 + pytest + 打包 + payload hash 校验），和本地 `tools\neko-check.cmd -r` 是同一件事；另一个 job 在 Windows / Ubuntu 各跑一遍 226 项离线套件。
+CI 用的就是官方那套，不是另写一遍：`.github/workflows/verify.yml` 直接 `uses:` N.E.K.O 的 `plugin-market-verify.yml`（挂载 → ruff → `sync --clean` → `check -r`），另加一个 Windows job 再跑一遍离线套件；`.github/workflows/release.yml` 同样是官方模板，打 `v*` tag 时由 `plugin-market-release.yml` 发布。
 
-（没有直接 `uses:` 官方那个 `plugin-market-verify.yml`：它跑的是 `ruff --ignore-noqa`，而本仓库有三处刻意的 `noqa` —— 两个脚本必须先把自身目录塞进 `sys.path` 才能 `import core`，以及一处写着缓存规则的死变量 —— 那条门永远过不去；它还要求 `release.yml` 与插件市场的仓库命名。工作流里搬的是它真正干活的那三步。）
+能复用官方工作流的前提是它那几道门都过得去，其中一条是 `ruff --ignore-noqa` —— 也就是说代码里不能靠 `noqa` 压制任何东西。为此两个脚本里「先把自身目录塞进 `sys.path` 再 import `core`」的地方改成了 `importlib.import_module`（调用不是 import 语句，E402 无从谈起），并删掉了 `core/tts.py` 里一行写着缓存规则说明的死变量。
 
 
 游戏 mod 由插件生成并安装，不需要手工放置。想手工用也可以：

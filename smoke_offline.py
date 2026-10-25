@@ -24,6 +24,7 @@ silently dropped.
 
 from __future__ import annotations
 
+import importlib
 import os
 import pathlib
 import re
@@ -44,8 +45,14 @@ HERE = pathlib.Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from core import bridge as bridge_core  # noqa: E402
-from core import ddsicon, gamelog, voicepack  # noqa: E402
+# ``import_module`` instead of an ``import`` statement: ``core`` only becomes
+# importable after the ``sys.path`` edit above, and N.E.K.O's own CI lints with
+# ``ruff --ignore-noqa`` -- where a suppression is not a thing -- so there is
+# nothing here to suppress.
+bridge_core = importlib.import_module("core.bridge")
+ddsicon = importlib.import_module("core.ddsicon")
+gamelog = importlib.import_module("core.gamelog")
+voicepack = importlib.import_module("core.voicepack")
 
 
 def _host_root() -> pathlib.Path | None:

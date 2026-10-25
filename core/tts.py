@@ -463,7 +463,6 @@ async def synthesize_many(
     if not total:
         return results
 
-    fingerprint = settings.fingerprint()  # noqa: F841 - kept for readability of the cache rule
     cache_dir = Path(cache_dir) if cache_dir else None
     if cache_dir:
         cache_dir.mkdir(parents=True, exist_ok=True)

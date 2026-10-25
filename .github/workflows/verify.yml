@@ -1,20 +1,17 @@
 name: verify
 
-# 两个 job，各回答一个问题：
+# 两个 job：
 #
-#   offline    —— 产出格式还对吗？不联网、不开游戏、不装宿主，纯断言格式。
-#                 （声音组覆盖、localisation BOM、DDS 头、桥接钩子、安装路径、
-#                 Hosted UI 契约、TTS 连接复用……全套 226 项。）
-#   neko-check —— N.E.K.O 自己的 CLI 认不认这个仓库？把本仓库挂进 N.E.K.O 的
-#                 plugin/plugins/neko_stellaris，跑官方的
-#                 `neko-plugin sync --clean` 与 `check -r`
-#                 （strict 校验 + pytest + 打包 + payload hash 校验）。
+#   neko-verify —— 直接 `uses:` N.E.K.O 自己的 plugin-market-verify.yml：
+#                  把本仓库挂成 plugin/plugins/neko_stellaris、ruff 检查、
+#                  `neko-plugin sync --clean`、`neko-plugin check -r`
+#                  （strict 校验 + pytest + 打包 + payload hash 校验）。
+#                  也就是说 CI 用的就是官方那套检查，不是另写一遍。
+#   offline     —— Windows 上再跑一遍 226 项离线套件（官方那个只跑 ubuntu）。
 #
-# 为什么没直接 `uses:` 官方那个 plugin-market-verify.yml：它跑的是
-# `ruff --ignore-noqa`，而本仓库有 3 处**刻意的** noqa（两个脚本要把自己所在目录
-# 塞进 sys.path 之后才能 import core/，以及一处写着缓存规则说明的死变量），
-# 那条路径永远过不了；它另外还会要求 release.yml 与 market 命名。这里只搬它真正
-# 干活的那三步，行为与本地 `tools/neko-check.cmd -r` 完全一致。
+# 之所以能复用官方的，是因为本仓库做到了它要求的几件事：仓库根即插件目录、
+# `.vscode` / `.github` / `.gitignore` / `tests/test_smoke.py` / `pyproject.toml`
+# 齐全、并且 `ruff --ignore-noqa` 干净（代码里没有任何 noqa 压制）。
 
 on:
   push:
@@ -29,13 +26,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  neko-verify:
+    uses: Project-N-E-K-O/N.E.K.O/.github/workflows/plugin-market-verify.yml@main
+    with:
+      plugin-id: neko_stellaris
+      neko-repository: Project-N-E-K-O/N.E.K.O
+      neko-ref: main
+
   offline:
-    name: offline suite (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+    name: offline suite (windows)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -48,7 +48,7 @@ jobs:
           python -m pip install --quiet --upgrade pip
           python -m pip install --quiet "websockets~=15.0.1" pillow pytest ruff==0.12.4
 
-      - name: Lint (same rule set as N.E.K.O's own CI)
+      - name: Lint
         run: python -m ruff check .
 
       - name: Offline regression suite
@@ -56,41 +56,3 @@ jobs:
 
       - name: pytest entry point
         run: python -m pytest tests -q
-
-  neko-check:
-    name: neko-plugin check -r
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout this plugin repository
-        uses: actions/checkout@v4
-        with:
-          path: plugin-repo
-
-      - name: Checkout N.E.K.O
-        uses: actions/checkout@v4
-        with:
-          repository: Project-N-E-K-O/N.E.K.O
-          ref: main
-          path: neko
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-
-      - name: Mount plugin into the N.E.K.O tree
-        run: |
-          set -euo pipefail
-          rm -rf neko/plugin/plugins/neko_stellaris
-          mkdir -p neko/plugin/plugins/neko_stellaris
-          cp -R plugin-repo/. neko/plugin/plugins/neko_stellaris/
-          rm -rf neko/plugin/plugins/neko_stellaris/.git
-
-      - name: Sync plugin dependencies
-        working-directory: neko
-        run: uv run --with pip python -m plugin.neko_plugin_cli.cli sync neko_stellaris --clean
-
-      - name: Release check (strict + pytest + package + payload hash)
-        working-directory: neko
-        run: |
-          set -o pipefail
-          mkdir -p plugin/neko_plugin_cli/target
-          uv run python -m plugin.neko_plugin_cli.cli check -r neko_stellaris | tee plugin/neko_plugin_cli/target/neko_stellaris.check-release.txt

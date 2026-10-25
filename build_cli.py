@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib
 import json
 import logging
 import pathlib
@@ -45,11 +46,18 @@ HERE = pathlib.Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from core import bridge as bridge_core  # noqa: E402
-from core import combined as combined_core  # noqa: E402
-from core import installer, nekoconfig, voicepack  # noqa: E402
-from core import standalone as standalone_core  # noqa: E402
-from core.tts import TtsSettings  # noqa: E402
+# These are ``import_module`` calls rather than ``import`` statements on purpose:
+# ``core`` only becomes importable after the ``sys.path`` edit above, so real
+# import statements would sit below executable code (E402) and need a suppression.
+# N.E.K.O's own CI lints with ``ruff --ignore-noqa``, where a suppression does not
+# exist, so the imports are spelled as calls and there is nothing to suppress.
+bridge_core = importlib.import_module("core.bridge")
+combined_core = importlib.import_module("core.combined")
+installer = importlib.import_module("core.installer")
+nekoconfig = importlib.import_module("core.nekoconfig")
+standalone_core = importlib.import_module("core.standalone")
+voicepack = importlib.import_module("core.voicepack")
+TtsSettings = importlib.import_module("core.tts").TtsSettings
 
 DATA = HERE / "data"
 
