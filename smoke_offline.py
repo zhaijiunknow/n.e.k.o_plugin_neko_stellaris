@@ -90,6 +90,16 @@ HOST_SETTINGS = _host_settings()
 
 DATA = HERE / "data"
 
+# Labels and skip reasons are free to contain Chinese, but a piped stdout on
+# Windows defaults to the console code page (cp1252 on a CI runner), where that
+# text is not representable -- the suite would then die while *reporting* a skip,
+# which is the worst possible failure mode for a suite. Pin the streams to UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):  # pragma: no cover - not a TextIOWrapper
+        pass
+
 FAILURES: list[str] = []
 SKIPPED: list[str] = []
 CHECKS = 0
@@ -978,7 +988,14 @@ def test_icon_from_art() -> None:
 
     try:
         payload = ddsicon.render_icon_from_image(source)
-    except Exception as exc:  # noqa: BLE001 - Pillow is optional
+    except ImportError as exc:
+        # Pillow is optional: the host ships it, a bare interpreter may not. A
+        # missing dependency must read as "not attempted" -- reporting it as a
+        # FAIL turns every CI runner without Pillow into a false alarm about the
+        # icon, which is the one thing this section exists to check honestly.
+        skip("icon rendering from source art", f"{type(exc).__name__}: {exc}")
+        return
+    except Exception as exc:  # noqa: BLE001
         check("Pillow can render the icon", False, f"{type(exc).__name__}: {exc}")
         return
 
