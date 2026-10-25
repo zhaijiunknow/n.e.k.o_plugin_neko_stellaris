@@ -88,6 +88,29 @@ plugin/                 N.E.K.O 插件本体
 
 > N.E.K.O 也支持把外部目录注册成开发源（development registration），但那条路径要求入口写成 `plugins.<id>` 命名空间，和内置位置的写法不同，且需要在运行中的宿主里注册。这里不依赖它。
 
+### 这个仓库是唯一的维护点
+
+**所有改动都发生在 `plugin/`**，别的任何副本都是从这里导出/部署出去的。
+
+自检在仓库里就能跑，不需要宿主在场（三项依赖宿主 SDK 的检查会显式跳过）：
+
+```
+python plugin/smoke_offline.py        # 223 项通过 + 3 项跳过
+```
+
+想在 N.E.K.O 里跑、或看插件面板时，把仓库这一份部署过去（单向覆盖）：
+
+```
+robocopy plugin "<N.E.K.O 安装目录>\plugin\plugins\neko_stellaris" /MIR /XD __pycache__ /XF *.pyc
+```
+
+然后重启宿主（或在插件管理器里重新加载）。注意 `plugin.toml` 的入口是
+`plugin.plugins.neko_stellaris:...`，所以这一份**必须**放在那个目录名下才能被加载，
+在仓库里原地是加载不了的。
+
+> 部署 ≠ 生成游戏内 mod。前者把**插件代码**放进宿主；后者（下面的 `build_cli.py`）产出并安装
+> 《群星》的 **mod 数据**。两条路写的是完全不同的目录。
+
 游戏 mod 由插件生成并安装，不需要手工放置。想手工用也可以：
 
 ```
