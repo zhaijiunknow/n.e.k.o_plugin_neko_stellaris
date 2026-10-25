@@ -43,21 +43,28 @@
 
 ## 5. 发布前必须做的一件事
 
-**先自己进一次游戏，确认日志干净。** 因为：
+**先自己进一次游戏，确认日志干净。** 历史上这条要求不是形式主义：
+早先的构建在真机里产生过 55,019 行 `unsupported scope`、32,492 行 `Invalid context switch`，
+而离线检查当时是"通过"的。
 
-- `logs/error.log` 里最后一整段（22:10 那次运行）是**修复前**的资产产生的：
-  64 行 `No sound scripted for soundoverride`、55,019 行 `unsupported scope`、5 行
-  `advisor voice type` 缺本地化。
-- 这些都是后来修掉的设计，当前已装的包是新结构（166 条顶层 `sound = {}` 声明
-  + 82 条覆盖 = 248 条录音，事件类型按钩子分配）。
-- **但修复后的包还没有被游戏加载过。** 游戏上次运行是 01:43，而重建是 03:01 / 04:33。
+## 6. 1.0.1 的发布前核查（已完成，2026-10-20）
 
-所以发布前请启动一次游戏、玩几分钟、退出，然后：
+用本地安装的 1.0.1 包实跑一局后的日志：
+
+| 检查 | 结果 |
+|---|---|
+| `error.log` 搜 `neko_bridge_events` | **0 行**（此前 32,492） |
+| 搜 `Invalid context switch` | **0 行** |
+| 搜 `unsupported scope` | **0 行**（此前 11 行，且那 11 行是原版 `fircon.5035`） |
+| `game.log` 搜 `NEKO\|v1\|` | 177 行 / 13 种事件 |
+| `survey_completed_planet` | **89 行**（此前 32,383 次报错、几乎从不执行） |
+| `first_contact_finished` | **5 行**（此前 0，钩子静默坏掉） |
+
+也就是说这套资产在真机里是干净的，可以发布。下次改完资产仍要做这一步：
 
 ```
-文档\Paradox Interactive\Stellaris\logs\error.log   → 搜 nekko_stellaris，应为 0 行
+文档\Paradox Interactive\Stellaris\logs\error.log   → 搜 nekko_stellaris / Invalid context switch，应为 0 行
                                             → 搜 No sound scripted / unsupported scope，应为 0 行
 文档\Paradox Interactive\Stellaris\logs\game.log    → 搜 NEKO|，应能看到事件（含心跳）
 ```
 
-搜出来是 0 行，才说明这套资产在真机里是好的。在此之前发布，用户拿到的是 5 万行报错。

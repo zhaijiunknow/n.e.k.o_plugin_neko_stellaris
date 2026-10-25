@@ -59,7 +59,7 @@ class CombinedSpec:
     """Identity of the single mod that carries both halves."""
 
     mod_id: str = voicepack.DEFAULT_MOD_ID
-    mod_version: str = "1.0.0"
+    mod_version: str = "1.0.1"
     supported_version: str = "4.5.*"
     name_zh: str = DEFAULT_NAME_ZH
     name_en: str = DEFAULT_NAME_EN

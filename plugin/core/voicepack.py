@@ -155,7 +155,7 @@ class PackSpec:
     # The in-game advisor-voice option. Deliberately separate: see MOD_NAME_ZH.
     voice_display_zh: str = VOICE_DISPLAY_ZH
     voice_display_en: str = VOICE_DISPLAY_EN
-    mod_version: str = "1.0.0"
+    mod_version: str = "1.0.1"
     supported_version: str = "4.5.*"
     tags: tuple[str, ...] = ("Sound",)
     max_variants: int = DEFAULT_VARIANTS
