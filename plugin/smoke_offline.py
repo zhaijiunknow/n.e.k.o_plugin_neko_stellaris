@@ -1512,6 +1512,38 @@ def test_hosted_ui() -> None:
         check(f"{name} covers every label the panel uses", not missing, missing[:4])
 
 
+def test_manifest_schema() -> None:
+    """Validate plugin.toml against the host's own pydantic schema.
+
+    The host logs a warning and keeps going when this fails, so a malformed field
+    is silent in every direction except that one log line -- which is exactly how
+    ``capabilities = "text"`` sat there while the schema expects a list.
+    """
+    section("manifest vs host schema")
+    try:
+        import tomllib
+    except ImportError:  # pragma: no cover
+        skip("manifest schema", "tomllib 不可用")
+        return
+    try:
+        import sys as _sys
+
+        if str(REPO_ROOT := HERE.parents[2]) not in _sys.path:
+            _sys.path.append(str(REPO_ROOT))
+        from plugin.config.schema import PluginSectionSchema
+    except Exception:
+        skip("manifest schema", "宿主 SDK 不可导入（本仓库布局）")
+        return
+
+    data = tomllib.loads((HERE / "plugin.toml").read_text(encoding="utf-8"))
+    try:
+        PluginSectionSchema.model_validate(data["plugin"])
+        ok, detail = True, ""
+    except Exception as exc:  # noqa: BLE001
+        ok, detail = False, str(exc).splitlines()[2] if len(str(exc).splitlines()) > 2 else str(exc)
+    check("plugin.toml passes the host's manifest schema", ok, detail)
+
+
 def main() -> int:
     print("neko_stellaris offline smoke suite")
     test_voice_plan()
@@ -1532,6 +1564,7 @@ def main() -> int:
     test_bridge_scope_links()
     test_install_paths()
     test_hosted_ui()
+    test_manifest_schema()
     test_tts_session()
 
     print()

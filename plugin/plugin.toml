@@ -40,7 +40,7 @@ enabled = true
 [plugin.models.analysis]
 label = "顾问台词创作"
 required = false
-capabilities = "text"
+capabilities = ["text"]
 
 # ---------------------------------------------------------------------------
 # 每项都可以被环境变量覆盖：NEKO_STELLARIS_<大写的键名>，例如
