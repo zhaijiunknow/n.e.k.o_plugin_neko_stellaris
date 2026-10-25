@@ -152,7 +152,9 @@ cd <N.E.K.O>
 
 当前结果是 **0 error**。警告只剩一条，而且是 CLI 自己的字段白名单过旧：`[plugin].models is not a recognized plugin.toml field` —— 宿主的 `PluginSectionSchema` 接受 `[plugin.models.<usage>]`（设计文档 `docs/design/plugin-model-slots.md` 也是这么写的），所以这条保留不动，不为了讨好检查器去删掉真正在用的配置。
 
-`-r` 那一档也正是 CI 跑的东西：`.github/workflows/verify.yml` 直接复用 N.E.K.O 自己的 `plugin-market-verify.yml`（ruff → 把本仓库挂载成 `plugin/plugins/neko_stellaris` → `neko-plugin check -r`），不是另写一套检查。
+`-r` 那一档也正是 CI 在做的事：`.github/workflows/verify.yml` 会把本仓库挂进 N.E.K.O 的 `plugin/plugins/neko_stellaris`，跑官方的 `sync --clean` 与 `check -r`（strict 校验 + pytest + 打包 + payload hash 校验），和本地 `tools\neko-check.cmd -r` 是同一件事；另一个 job 在 Windows / Ubuntu 各跑一遍 226 项离线套件。
+
+（没有直接 `uses:` 官方那个 `plugin-market-verify.yml`：它跑的是 `ruff --ignore-noqa`，而本仓库有三处刻意的 `noqa` —— 两个脚本必须先把自身目录塞进 `sys.path` 才能 `import core`，以及一处写着缓存规则的死变量 —— 那条门永远过不去；它还要求 `release.yml` 与插件市场的仓库命名。工作流里搬的是它真正干活的那三步。）
 
 
 游戏 mod 由插件生成并安装，不需要手工放置。想手工用也可以：
