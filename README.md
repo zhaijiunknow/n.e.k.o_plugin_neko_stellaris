@@ -1,5 +1,8 @@
 # 星辰喵语 — 把 N.E.K.O 接进《群星》
 
+[![verify](https://github.com/zhaijiunknow/neko-stellaris/actions/workflows/verify.yml/badge.svg)](https://github.com/zhaijiunknow/neko-stellaris/actions/workflows/verify.yml)
+[![neko-plugin check](https://img.shields.io/badge/neko--plugin%20check-0%20error-brightgreen)](https://github.com/zhaijiunknow/neko-stellaris#用-neko-自己的-cli-检查它)
+
 一个 N.E.K.O 插件，外加它生成的《群星》顾问语音包工具链。
 
 > 名字的三个位置是**不同的**，这是刻意的：
