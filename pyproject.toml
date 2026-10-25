@@ -19,8 +19,8 @@ dependencies = []
 
 [tool.pytest.ini_options]
 # 跑法请用 `pytest tests`（或 `neko-plugin check -r`，它传的就是 tests/ 的路径）。
-# 仓库根有 __init__.py —— 那是插件入口 module，而目录名 neko-stellaris 不是合法
-# Python 标识符，rootdir 落在仓库根时 pytest 会试着把它当包 import 然后炸。
+# 仓库根有 __init__.py —— 那是插件入口 module，而仓库目录名不是合法 Python 标识符
+# （含 - 或 .），rootdir 落在仓库根时 pytest 会试着把它当包 import 然后炸。
 # tests/pytest.ini 就是为这件事把 rootdir 钉在 tests/ 上的；裸跑 `pytest` 会用到
 # 下面这个 testpaths 而 rootdir 仍是仓库根，所以别裸跑。
 testpaths = ["tests"]
