@@ -462,7 +462,7 @@ plugin/plugins/neko_stellaris/
 python plugin/plugins/neko_stellaris/build_cli.py standalone
 ```
 
-产出 `nekko_stellaris_advisor-standalone/` 加一个 `nekko_stellaris_advisor-1.0.0.zip`（30.6 MiB）。
+产出 `nekko_stellaris_advisor-standalone/` 加一个 `nekko_stellaris_advisor-1.0.1.zip`（30.9 MiB）。
 
 **被移走的东西**（这些没有插件时要么是死代码，要么只是给插件看的）：
 

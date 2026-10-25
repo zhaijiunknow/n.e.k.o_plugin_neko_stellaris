@@ -1,6 +1,6 @@
 [project]
 name = "neko-stellaris"
-version = "1.0.1"
+version = "0.1.0"
 description = "把 N.E.K.O 接进《群星》：生成游戏内顾问语音包（YUI），并尾随 game.log 实时解说"
 readme = "README.md"
 requires-python = ">=3.11"
