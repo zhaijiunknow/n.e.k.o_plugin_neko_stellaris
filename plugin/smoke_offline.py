@@ -1248,9 +1248,89 @@ def test_bridge_scope_links() -> None:
           "last_increased_tech" not in rendered)
 
 
+def test_install_paths() -> None:
+    """The only code that writes into the user's real game directory.
+
+    It copies the whole payload, deletes a previous install, writes the stub and
+    edits ``dlc_load.json`` -- and nothing exercised any of it. The ownership guard
+    is the safety net for the worst failure this plugin can commit: deleting a
+    user's own mod because two ids collided.
+    """
+    section("install / uninstall paths")
+    import json
+    import shutil
+    import tempfile
+
+    from core import installer as inst
+
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="neko-install-"))
+    try:
+        src = tmp / "built"
+        (src / "sound").mkdir(parents=True)
+        (src / "descriptor.mod").write_text('version="9.9.9"\n', encoding="utf-8")
+        (src / "sound" / "x.asset").write_text("soundgroup = { }\n", encoding="utf-8")
+        (src / "sound" / "a.wav").write_bytes(b"RIFF" + bytes(60))
+
+        user = tmp / "Stellaris"
+        (user / "mod").mkdir(parents=True)
+        dlc = user / "dlc_load.json"
+        dlc.write_text('{"enabled_mods": [], "disabled_dlcs": []}', encoding="utf-8")
+        target = user / "mod" / "demo_mod"
+
+        first = inst.install_pack(src, user, mod_id="demo_mod",
+                                  mod_stub_text='version="9.9.9"\nname="demo"\n',
+                                  version="9.9.9", register_playset=False)
+        check("a fresh install copies the payload",
+              (target / "sound" / "x.asset").is_file()
+              and (target / "sound" / "a.wav").stat().st_size > 40,
+              first.summary())
+        check("the install writes the ownership marker",
+              (target / inst.MARKER_NAME).is_file())
+        check("the stub lands beside the mod folder",
+              (user / "mod" / "demo_mod.mod").is_file())
+        check("dlc_load lists the mod",
+              "mod/demo_mod.mod" in
+              json.loads(dlc.read_text(encoding="utf-8"))["enabled_mods"])
+
+        again = inst.install_pack(src, user, mod_id="demo_mod",
+                                  mod_stub_text='version="9.9.9"\n', version="9.9.9",
+                                  register_playset=False)
+        check("a second install refreshes rather than duplicating",
+              again.already_present and (target / "sound" / "x.asset").is_file())
+
+        foreign = user / "mod" / "someone_else"
+        foreign.mkdir()
+        (foreign / "precious.txt").write_text("mine", encoding="utf-8")
+        refused = False
+        try:
+            inst.install_pack(src, user, mod_id="someone_else",
+                              mod_stub_text='version="1"\n', register_playset=False)
+        except inst.InstallError:
+            refused = True
+        check("installing over a directory we do not own is refused", refused)
+        check("and the refused directory is left byte-for-byte intact",
+              (foreign / "precious.txt").read_text(encoding="utf-8") == "mine")
+
+        refused_delete = False
+        try:
+            inst.uninstall_pack(user, mod_id="someone_else")
+        except inst.InstallError:
+            refused_delete = True
+        check("uninstalling a directory we do not own is refused", refused_delete)
+        check("and that directory survives too", (foreign / "precious.txt").is_file())
+
+        inst.uninstall_pack(user, mod_id="demo_mod")
+        check("uninstalling our own mod removes the folder and the stub",
+              not target.exists() and not (user / "mod" / "demo_mod.mod").exists())
+        check("and clears it from dlc_load",
+              "mod/demo_mod.mod" not in
+              json.loads(dlc.read_text(encoding="utf-8"))["enabled_mods"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_tts_session() -> None:
     """A batch reuses one connection, and turn boundaries stay in sync.
-
     Both properties are load-bearing and neither is visible in the output, which
     is why they are tested against a local fake endpoint instead of the real one:
       * the limiter counts *connections*, so opening one per line is what made a
@@ -1385,6 +1465,7 @@ def main() -> int:
     test_layout_independence()
     test_published_copy()
     test_bridge_scope_links()
+    test_install_paths()
     test_tts_session()
 
     print()

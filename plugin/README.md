@@ -380,7 +380,7 @@ python plugin/plugins/neko_stellaris/build_cli.py combined --name "由依" --ins
 .venv\Scripts\python.exe plugin\plugins\neko_stellaris\smoke_offline.py
 ```
 
-在宿主里是 202 项检查；从独立仓库直接跑是 200 项通过 + 2 项跳过——那两项要经插件入口读 `Settings`，需要宿主 SDK，缺了它会**显式报告跳过**而不是静默少算。命令在两种布局下都能跑：宿主里用上面那条路径，从独立仓库跑则是 `python plugin/smoke_offline.py`。
+在宿主里是 213 项检查；从独立仓库直接跑是 211 项通过 + 2 项跳过——那两项要经插件入口读 `Settings`，需要宿主 SDK，缺了它会**显式报告跳过**而不是静默少算。命令在两种布局下都能跑：宿主里用上面那条路径，从独立仓库跑则是 `python plugin/smoke_offline.py`。
 
 **不联网、不碰 TTS、不碰游戏**，断言的是插件产出的**格式**——因为这里才是昂贵的错误所在：一个没有覆盖全部可达声音的 soundgroup、一个少了 BOM 的本地化文件、一个头部与原版不符的 DDS、一个没有任何 on_action 会触发的桥接事件。
 
@@ -417,7 +417,7 @@ plugin/plugins/neko_stellaris/
 │   └── persona_brief.md     人设结论（自称「本喵」、称玩家「碳基生物」的来源）
 ├── assets/                  顾问图标原图（游戏内 DDS 与工坊缩略图的上游）
 ├── build_cli.py             不依赖宿主的命令行入口
-├── smoke_offline.py         200 项离线回归检查（宿主内 202）
+├── smoke_offline.py         211 项离线回归检查（宿主内 213）
 └── i18n/
 ```
 
